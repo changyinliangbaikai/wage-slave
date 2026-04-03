@@ -1,0 +1,125 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-app-region: no-drag;
+}
+
+.app-container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 8px;
+  position: relative;
+}
+
+/* 气泡浮在猫咪上方 */
+.bubble-layer {
+  position: absolute;
+  bottom: 160px;   /* 猫咪高度 + 间距 */
+  left: 50%;
+  transform: translateX(-50%);
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 猫咪层 - JS 拖动，不使用 CSS drag 模式 */
+.cat-layer {
+  position: relative;
+  z-index: 10;
+  cursor: grab;
+}
+.cat-layer:active { cursor: grabbing; }
+
+/* 右键菜单放在猫咪层上面 */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: auto;
+}
+
+/* 空闲提示文字 */
+.idle-hint {
+  font-size: 10px;
+  color: rgba(100, 60, 20, 0.4);
+  text-align: center;
+  margin-bottom: 4px;
+  font-family: 'Microsoft YaHei', sans-serif;
+}
+
+/* 待办清单展示 */
+.todos-display {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #3a1a04;
+  font-family: 'Microsoft YaHei', sans-serif;
+}
+
+.todo-item.done .todo-title {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.todo-check { font-size: 13px; color: #d4874a; }
+.todo-title { flex: 1; }
+
+.tag-high {
+  font-size: 10px;
+  background: #e05a3a;
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+
+/* 晚间复盘待办勾选列表 */
+.todo-review-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+
+.todo-review-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #3a1a04;
+  cursor: pointer;
+  font-family: 'Microsoft YaHei', sans-serif;
+}
+
+.todo-review-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: #d4874a;
+}
+
+.todo-review-item .done {
+  text-decoration: line-through;
+  opacity: 0.5;
+}

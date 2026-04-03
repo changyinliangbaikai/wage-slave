@@ -1,0 +1,116 @@
+name: Build & Release
+
+on:
+  # 推送 tag（如 v1.0.0）时自动触发正式发布
+  push:
+    tags:
+      - 'v*'
+
+  # 手动触发（用于测试构建，不发布 Release）
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: '是否创建草稿 Release（否则只上传 Artifact）'
+        type: boolean
+        default: false
+
+jobs:
+  # ── Windows 构建 ───────────────────────────────────────
+  build-windows:
+    name: Build Windows Installer
+    runs-on: windows-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # 安装依赖（包括 native 模块的 Windows 编译）
+      - name: 安装依赖
+        run: npm ci
+
+      # 如果使用了 iohook，需要重新编译 native binding
+      - name: 重编译 native 模块（如有）
+        run: |
+          if (Test-Path "node_modules/iohook") {
+            npx electron-rebuild -f -w iohook
+          } else {
+            Write-Host "iohook 未安装，跳过"
+          }
+        shell: pwsh
+
+      # 构建（编译 TypeScript + Vite 打包前端）
+      - name: 构建项目
+        run: npm run build
+
+      # 打包为 Windows 安装包
+      # 如需代码签名，在此步骤前配置证书（见下方注释）
+      - name: 打包 Windows 安装包
+        run: npm run dist
+        env:
+          # 如果配置了代码签名证书，取消以下注释并在 Secrets 中配置
+          # CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          # CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 上传安装包为 Artifact（每次构建都可下载，无论是否发布 Release）
+      - name: 上传安装包 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiao-niu-ma-windows-${{ github.sha }}
+          path: |
+            release/*.exe
+            release/*.msi
+          retention-days: 30
+
+  # ── 发布 Release（仅 tag 推送时执行）──────────────────
+  release:
+    name: Create GitHub Release
+    needs: build-windows
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: xiao-niu-ma-windows-*
+          merge-multiple: true
+          path: ./release-files
+
+      - name: 读取版本号
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 小小牛马 v${{ steps.version.outputs.VERSION }}
+          draft: ${{ github.event.inputs.draft == 'true' }}
+          prerelease: false
+          files: ./release-files/*
+          body: |
+            ## 小小牛马 v${{ steps.version.outputs.VERSION }}
+
+            ### 安装说明
+            1. 下载 `小小牛马-Setup-${{ steps.version.outputs.VERSION }}.exe`
+            2. 双击安装（如弹出 Windows 安全提示，点击"更多信息"→"仍要运行"）
+            3. 安装完成后在系统托盘找到橘猫图标
+            4. 右键托盘图标 → 设置，填写 LLM API 信息
+
+            ### 数据存储位置
+            `%APPDATA%\xiao-niu-ma\`
+
+            ### 注意事项
+            - 首次运行需在设置中配置 LLM API Key
+            - 如休息提醒不生效，请在 Windows 安全中心将应用加入白名单
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
