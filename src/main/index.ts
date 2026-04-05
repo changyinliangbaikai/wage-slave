@@ -2,7 +2,14 @@
  * 小小牛马 - Electron 主进程入口
  */
 
+import log from 'electron-log/main'
 import { app, BrowserWindow } from 'electron'
+
+// 初始化文件日志（接管 console.log/warn/error，同时写入文件）
+log.initialize()
+log.transports.file.level = 'debug'
+// 日志文件位置：%APPDATA%\xiao-niu-ma\logs\main.log（Windows）
+console.log('[Main] 小小牛马启动，日志路径：', log.transports.file.getFile().path)
 import { createMainWindow, getMainWindow } from './windows'
 import { createTray } from './tray'
 import { startScheduler } from './scheduler'
@@ -62,6 +69,6 @@ app.on('activate', () => {
 })
 
 // 关闭所有窗口时不退出（常驻后台，依靠托盘图标退出）
-app.on('window-all-closed', (e) => {
-  e.preventDefault()
+app.on('window-all-closed', () => {
+  // 不调用 app.quit()，保持后台运行
 })

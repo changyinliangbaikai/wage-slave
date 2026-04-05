@@ -1,0 +1,153 @@
+.settings-container {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 24px;
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  color: #3a1a04;
+  background: #fffef5;
+  min-height: 100vh;
+  overflow-y: auto;
+}
+
+.settings-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  font-size: 16px;
+  color: #8b5e3c;
+}
+
+.settings-title {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 20px;
+  padding-bottom: 10px;
+  border-bottom: 3px solid #d4874a;
+}
+
+.settings-section {
+  margin-bottom: 20px;
+}
+
+.settings-section h2 {
+  font-size: 14px;
+  font-weight: bold;
+  color: #8b5e3c;
+  margin-bottom: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e8d4b0;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  gap: 12px;
+}
+
+.field-row label {
+  font-size: 13px;
+  color: #5a3a1a;
+  flex-shrink: 0;
+}
+
+.field-row input[type="text"],
+.field-row input[type="password"],
+.field-row input[type="number"],
+.field-row input[type="time"] {
+  flex: 1;
+  max-width: 240px;
+  padding: 6px 10px;
+  border: 2px solid #d4b87a;
+  background: #fff;
+  color: #3a1a04;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  border-radius: 0;
+}
+
+.field-row input:focus {
+  border-color: #d4874a;
+  box-shadow: inset 0 0 0 1px #d4874a;
+}
+
+.field-row input[type="number"] {
+  max-width: 80px;
+  text-align: center;
+}
+
+.field-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #d4874a;
+  cursor: pointer;
+}
+
+.btn-test {
+  margin-top: 8px;
+  padding: 6px 16px;
+  background: #fffde0;
+  border: 2px solid #3a1a04;
+  color: #3a1a04;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: 2px 2px 0 #3a1a04;
+  border-radius: 0;
+}
+.btn-test:hover { background: #f0e8c0; }
+.btn-test:active { box-shadow: none; transform: translate(2px, 2px); }
+
+.test-result {
+  margin-top: 8px;
+  font-size: 12px;
+  padding: 6px 10px;
+  background: #fffde0;
+  border: 1px solid #d4b87a;
+}
+
+.settings-footer {
+  padding-top: 16px;
+  border-top: 2px solid #d4b87a;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-save {
+  padding: 8px 24px;
+  background: #d4874a;
+  color: #fff;
+  border: 2px solid #3a1a04;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: 3px 3px 0 #3a1a04;
+  border-radius: 0;
+}
+.btn-save:hover { background: #c0733a; }
+.btn-save:active { box-shadow: none; transform: translate(3px, 3px); }
+.btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.dir-picker {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 240px;
+}
+
+.dir-picker input[type="text"] {
+  flex: 1;
+  max-width: none;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dir-picker .btn-test {
+  margin-top: 0;
+  flex-shrink: 0;
+}

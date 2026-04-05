@@ -1,5 +1,6 @@
 /**
  * 晚间复盘流程
+ * review-todos → supplement（补充日志）→ done
  */
 
 import { useState, useCallback } from 'react'
@@ -13,7 +14,7 @@ interface Props {
   onDone: () => void
 }
 
-type Step = 'greeting' | 'review-todos' | 'manual-log' | 'done'
+type Step = 'greeting' | 'review-todos' | 'supplement' | 'manual-log' | 'done'
 
 export default function EveningFlow({ date, todos, onDone }: Props) {
   const [step, setStep] = useState<Step>('greeting')
@@ -33,13 +34,41 @@ export default function EveningFlow({ date, todos, onDone }: Props) {
     ))
   }
 
-  const handleSubmitTodos = useCallback(async () => {
+  // 勾选完成后，进入补充日志步骤
+  const handleTodosNext = useCallback(async () => {
     setSaving(true)
     await saveTodos(date, updatedTodos)
+    setSaving(false)
+    setStep('supplement')
+  }, [date, updatedTodos])
+
+  // 保存补充日志 + 最终提交
+  const handleSubmitSupplement = useCallback(async () => {
+    setSaving(true)
+    const doneCount = updatedTodos.filter(t => t.status === 'done').length
+    const summary = `完成 ${doneCount}/${updatedTodos.length} 项任务`
+    const eodLog = logText.trim()
+      ? `${summary}\n\n${logText.trim()}`
+      : summary
     await saveLog({
       date,
       todos: updatedTodos,
-      eod_log: `完成 ${updatedTodos.filter(t => t.status === 'done').length}/${updatedTodos.length} 项任务`,
+      eod_log: eodLog,
+      updated_at: new Date().toISOString(),
+    })
+    setSaving(false)
+    setStep('done')
+    setTimeout(onDone, 1500)
+  }, [date, updatedTodos, logText, onDone])
+
+  // 跳过补充，直接保存
+  const handleSkipSupplement = useCallback(async () => {
+    setSaving(true)
+    const doneCount = updatedTodos.filter(t => t.status === 'done').length
+    await saveLog({
+      date,
+      todos: updatedTodos,
+      eod_log: `完成 ${doneCount}/${updatedTodos.length} 项任务`,
       updated_at: new Date().toISOString(),
     })
     setSaving(false)
@@ -47,7 +76,8 @@ export default function EveningFlow({ date, todos, onDone }: Props) {
     setTimeout(onDone, 1500)
   }, [date, updatedTodos, onDone])
 
-  const handleSubmitLog = useCallback(async () => {
+  // 无待办时的手动日志
+  const handleSubmitManualLog = useCallback(async () => {
     if (!logText.trim()) { onDone(); return }
     setSaving(true)
     await saveLog({ date, eod_log: logText, morning_skipped: true })
@@ -84,8 +114,30 @@ export default function EveningFlow({ date, todos, onDone }: Props) {
           ))}
         </div>
         <div className="bubble-actions">
-          <button className="btn-primary" onClick={handleSubmitTodos} disabled={saving}>
-            {saving ? '保存中...' : '提交复盘'}
+          <button className="btn-primary" onClick={handleTodosNext} disabled={saving}>
+            {saving ? '保存中...' : '下一步'}
+          </button>
+        </div>
+      </SpeechBubble>
+    )
+  }
+
+  if (step === 'supplement') {
+    return (
+      <SpeechBubble visible message="还有什么想补充的吗？\n写下来，周报月报的时候会更丰富哦～">
+        <textarea
+          rows={4}
+          placeholder="今天遇到的问题、推进的进展、临时处理的事项..."
+          value={logText}
+          onChange={e => setLogText(e.target.value)}
+          autoFocus
+        />
+        <div className="bubble-actions">
+          <button className="btn-secondary" onClick={handleSkipSupplement} disabled={saving}>
+            跳过
+          </button>
+          <button className="btn-primary" onClick={handleSubmitSupplement} disabled={saving}>
+            {saving ? '保存中...' : '保存'}
           </button>
         </div>
       </SpeechBubble>
@@ -104,7 +156,7 @@ export default function EveningFlow({ date, todos, onDone }: Props) {
         />
         <div className="bubble-actions">
           <button className="btn-secondary" onClick={onDone}>算了，跳过</button>
-          <button className="btn-primary" onClick={handleSubmitLog} disabled={saving}>
+          <button className="btn-primary" onClick={handleSubmitManualLog} disabled={saving}>
             {saving ? '保存中...' : '保存日志'}
           </button>
         </div>

@@ -49,6 +49,8 @@ const DEFAULT_CONFIG: AppConfig = {
   auto_launch: false,
   cat_position: { x: -1, y: -1 },  // -1 表示使用默认位置（屏幕右下角）
   cat_hidden: false,
+  summary_export_docx: false,
+  summary_export_dir: '',
 }
 
 // ── 配置 ──────────────────────────────────────

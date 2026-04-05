@@ -34,15 +34,9 @@ jobs:
       - name: 安装依赖
         run: npm ci
 
-      # 如果使用了 iohook，需要重新编译 native binding
-      - name: 重编译 native 模块（如有）
-        run: |
-          if (Test-Path "node_modules/iohook") {
-            npx electron-rebuild -f -w iohook
-          } else {
-            Write-Host "iohook 未安装，跳过"
-          }
-        shell: pwsh
+      # 重新编译 uiohook-napi native binding（针对当前 Electron 版本）
+      - name: 重编译 uiohook-napi
+        run: npx electron-rebuild -f -w uiohook-napi
 
       # 构建（编译 TypeScript + Vite 打包前端）
       - name: 构建项目

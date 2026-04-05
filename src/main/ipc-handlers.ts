@@ -3,7 +3,7 @@
  * 所有 renderer → main 的请求在这里统一处理
  */
 
-import { ipcMain, app } from 'electron'
+import { ipcMain, app, dialog } from 'electron'
 import { IPC } from '@shared/ipc-channels'
 import {
   getConfig, setConfig,
@@ -11,8 +11,11 @@ import {
   getTodos, saveTodos,
   getLogsInRange, todayStr,
 } from './store'
-import { openSettingsWindow, showMainWindow } from './windows'
+import { openSettingsWindow, showMainWindow, openLogWindow } from './windows'
 import { snoozeBreak, resetContinuousTime } from './activity-monitor'
+import { parsePlan, generateSummary } from './llm-service'
+import { exportSummaryDocx } from './docx-export'
+import { getMainWindow } from './windows'
 import type { AppConfig, DailyLog, TodoItem } from '@shared/types'
 
 // ── 尝试加载 keytar（安全存储 API Key）──────────
@@ -34,7 +37,14 @@ export function registerIPCHandlers(): void {
   ipcMain.handle(IPC.CONFIG_SET, (_e, config: Partial<AppConfig>) => {
     const updated = setConfig(config)
     if ('auto_launch' in config) {
-      app.setLoginItemSettings({ openAtLogin: config.auto_launch ?? false })
+      try {
+        // 开发模式下 macOS 不允许未签名应用注册登录项，静默忽略
+        if (app.isPackaged) {
+          app.setLoginItemSettings({ openAtLogin: config.auto_launch ?? false })
+        }
+      } catch {
+        console.warn('[IPC] 设置开机自启失败（开发模式下正常）')
+      }
     }
     return updated
   })
@@ -55,14 +65,28 @@ export function registerIPCHandlers(): void {
     }
   })
 
-  // 测试 API 连通性
+  // 测试 API 连通性（用 chat/completions 发最小请求，兼容所有 OpenAI 格式服务商）
   ipcMain.handle(IPC.API_TEST, async (_e, { url, key, model }: { url: string; key: string; model: string }) => {
     try {
-      const res = await fetch(`${url.replace(/\/$/, '')}/v1/models`, {
-        headers: { Authorization: `Bearer ${key}` },
-        signal: AbortSignal.timeout(8000),
+      const baseUrl = url.replace(/\/$/, '')
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{ role: 'user', content: 'hi' }],
+          max_tokens: 1,
+        }),
+        signal: AbortSignal.timeout(15000),
       })
-      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+      if (!res.ok) {
+        const text = await res.text().catch(() => '')
+        const brief = text.slice(0, 120)
+        return { ok: false, error: `HTTP ${res.status}${brief ? ': ' + brief : ''}` }
+      }
       return { ok: true, model }
     } catch (e: unknown) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -91,8 +115,55 @@ export function registerIPCHandlers(): void {
 
   ipcMain.on(IPC.OPEN_SETTINGS, () => openSettingsWindow())
 
+  ipcMain.on(IPC.OPEN_LOGS, () => openLogWindow())
+
   // ── 休息提醒交互 ──────────────────────────────
   ipcMain.on(IPC.SNOOZE_BREAK, (_e, minutes: number) => snoozeBreak(minutes))
+  ipcMain.on(IPC.BREAK_DONE, () => resetContinuousTime())
 
   ipcMain.on('renderer:break-done', () => resetContinuousTime())
+
+  // ── LLM 调用（在主进程执行，绕过 CORS）───────
+  ipcMain.handle(IPC.LLM_PARSE_PLAN, async (_e, input: string) => {
+    const apiKey = keytar
+      ? (await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT) ?? '')
+      : ''
+    return parsePlan(input, apiKey)
+  })
+
+  ipcMain.handle(IPC.LLM_SUMMARY, async (_e, { logs, periodLabel }: { logs: DailyLog[]; periodLabel: string }) => {
+    const apiKey = keytar
+      ? (await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT) ?? '')
+      : ''
+    const win = getMainWindow()
+    const result = await generateSummary(logs, periodLabel, apiKey, (accumulated) => {
+      // 流式推送到渲染进程
+      win?.webContents.send(IPC.LLM_SUMMARY_STREAM, accumulated)
+    })
+    return result
+  })
+
+  // ── 目录选择器 ──────────────────────────────
+  ipcMain.handle(IPC.SELECT_DIRECTORY, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择工作总结导出目录',
+    })
+    if (result.canceled || result.filePaths.length === 0) return ''
+    return result.filePaths[0]
+  })
+
+  // ── 导出总结为 Word ──────────────────────────
+  ipcMain.handle(IPC.EXPORT_SUMMARY_DOCX, async (_e, { text, periodLabel }: { text: string; periodLabel: string }) => {
+    try {
+      const config = getConfig()
+      if (!config.summary_export_dir) {
+        return { ok: false, error: '未设置导出目录，请在设置中配置' }
+      }
+      const filePath = await exportSummaryDocx(text, periodLabel, config.summary_export_dir)
+      return { ok: true, filePath }
+    } catch (e: unknown) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
 }

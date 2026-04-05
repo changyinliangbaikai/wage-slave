@@ -56,10 +56,14 @@ export const saveTodos = (date: string, todos: TodoItem[]): Promise<void> =>
 export const getLogsRange = (start: string, end: string): Promise<DailyLog[]> =>
   api.invoke(IPC.LOGS_RANGE, { start, end }) as Promise<DailyLog[]>
 
+export const exportSummaryDocx = (text: string, periodLabel: string) =>
+  api.invoke(IPC.EXPORT_SUMMARY_DOCX, { text, periodLabel }) as Promise<{ ok: boolean; filePath?: string; error?: string }>
+
 // ── 窗口 & 系统 ────────────────────────────────
 export const openSettings = () => api.send(IPC.OPEN_SETTINGS)
+export const openLogs = () => api.send(IPC.OPEN_LOGS)
 export const snoozeBreak = (minutes: number) => api.send(IPC.SNOOZE_BREAK, minutes)
-export const notifyBreakDone = () => api.send('renderer:break-done')
+export const notifyBreakDone = () => api.send(IPC.BREAK_DONE)
 
 // 手动拖动窗口
 export const startWindowDrag = () => api.sendRaw('window:drag-start')

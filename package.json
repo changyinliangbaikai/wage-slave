@@ -21,10 +21,13 @@
     "vite": "^5.1.0"
   },
   "dependencies": {
+    "docx": "^9.0.0",
+    "electron-log": "^5.2.0",
     "electron-vite": "^2.3.0",
     "keytar": "^7.9.0",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "uiohook-napi": "^1.5.2"
   },
   "build": {
     "appId": "com.xiaoniu.ma",
@@ -55,6 +58,10 @@
       {
         "from": "assets/pixel_cat",
         "to": "pixel_cat"
+      },
+      {
+        "from": "assets/tray-icon.png",
+        "to": "pixel_cat/tray-icon.png"
       }
     ]
   }

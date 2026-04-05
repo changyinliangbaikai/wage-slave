@@ -10,7 +10,8 @@
     "rootDir": "src/renderer/src",
     "paths": {
       "@/*": ["./src/renderer/src/*"],
-      "@shared/*": ["./src/shared/*"]
+      "@shared/*": ["./src/shared/*"],
+      "@assets/*": ["./assets/*"]
     }
   },
   "include": ["src/renderer/src/**/*", "src/shared/**/*"]

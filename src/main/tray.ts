@@ -4,13 +4,17 @@
 
 import { Tray, Menu, nativeImage, app } from 'electron'
 import path from 'path'
-import { showMainWindow, openSettingsWindow } from './windows'
+import { showMainWindow, openSettingsWindow, openLogWindow, getMainWindow } from './windows'
 
 let tray: Tray | null = null
 
 export function createTray(): Tray {
-  // 使用像素猫头像作为托盘图标（16×16 或 32×32）
-  const iconPath = path.join(__dirname, '../../assets/tray-icon.png')
+  // 使用像素猫头像作为托盘图标
+  // 开发环境从项目根目录加载，生产环境从 resources 加载
+  const isDev = !app.isPackaged
+  const iconPath = isDev
+    ? path.join(__dirname, '../../assets/tray-icon.png')
+    : path.join(process.resourcesPath, 'pixel_cat', 'tray-icon.png')
   const icon = nativeImage.createFromPath(iconPath)
 
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)
@@ -23,11 +27,16 @@ export function createTray(): Tray {
     },
     { type: 'separator' },
     {
+      label: '☀️ 录入今日计划',
+      click: () => {
+        showMainWindow()
+        getMainWindow()?.webContents.send('main:trigger-morning-plan')
+      },
+    },
+    {
       label: '📋 查看今日待办',
       click: () => {
         showMainWindow()
-        // 通知渲染进程展开待办清单
-        const { getMainWindow } = require('./windows')
         getMainWindow()?.webContents.send('main:show-todos')
       },
     },
@@ -35,7 +44,6 @@ export function createTray(): Tray {
       label: '📝 录入工作日志',
       click: () => {
         showMainWindow()
-        const { getMainWindow } = require('./windows')
         getMainWindow()?.webContents.send('main:trigger-manual-log')
       },
     },
@@ -43,11 +51,14 @@ export function createTray(): Tray {
       label: '📊 生成工作总结',
       click: () => {
         showMainWindow()
-        const { getMainWindow } = require('./windows')
         getMainWindow()?.webContents.send('main:trigger-summary')
       },
     },
     { type: 'separator' },
+    {
+      label: '📒 查看工作日志',
+      click: () => openLogWindow(),
+    },
     {
       label: '⚙️ 设置',
       click: () => openSettingsWindow(),

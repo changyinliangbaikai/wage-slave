@@ -1,6 +1,6 @@
 /**
  * 晨间问候流程
- * 触发：到达上班时间 or 开机时在工作时段
+ * 触发：到达上班时间 or 开机时在工作时段 or 手动录入
  */
 
 import { useState, useCallback } from 'react'
@@ -20,7 +20,7 @@ type Step = 'greeting' | 'input' | 'parsing' | 'done'
 export default function MorningFlow({ date, onDone, onSkip }: Props) {
   const [step, setStep] = useState<Step>('greeting')
   const [input, setInput] = useState('')
-  const { parse, loading } = useParsePlan()
+  const { parse, loading, error } = useParsePlan()
 
   const handleConfirm = useCallback(async () => {
     if (!input.trim()) { onSkip(); return }
@@ -72,6 +72,11 @@ export default function MorningFlow({ date, onDone, onSkip }: Props) {
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleConfirm()
           }}
         />
+        {error && (
+          <div style={{ fontSize: 11, color: '#e05a3a', marginTop: 4 }}>
+            {error}
+          </div>
+        )}
         <div className="bubble-actions">
           <button className="btn-secondary" onClick={handleSkip}>跳过</button>
           <button
