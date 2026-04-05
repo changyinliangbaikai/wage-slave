@@ -34,6 +34,8 @@ export interface AppConfig {
   auto_launch: boolean          // 开机自启
   cat_position: { x: number; y: number }
   cat_hidden: boolean           // 是否收起到边缘
+  summary_export_docx: boolean  // 是否导出工作总结为 Word 文档
+  summary_export_dir: string    // 导出目录路径
 }
 
 /** 像素猫动画状态 */

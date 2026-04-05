@@ -1,15 +1,19 @@
+/* 像素风右键菜单 */
 .context-menu {
   position: fixed;
-  z-index: 2147483647;  /* 最大 z-index */
-  background: rgba(30, 30, 40, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  padding: 6px 0;
+  z-index: 2147483647;
+  background: #fffef0;
+  border: 3px solid #3a1a04;
+  border-radius: 0;
+  padding: 4px 0;
   min-width: 160px;
-  max-width: 240px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(12px);
+  box-shadow:
+    inset -2px -2px 0 #d4b87a,
+    inset 2px 2px 0 #fffde0,
+    4px 4px 0 rgba(0, 0, 0, 0.2);
   pointer-events: auto;
+  image-rendering: pixelated;
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
 }
 
 .menu-item {
@@ -17,13 +21,20 @@
   align-items: center;
   padding: 8px 14px;
   cursor: pointer;
-  color: rgba(255, 255, 255, 0.9);
+  color: #3a1a04;
   font-size: 13px;
-  transition: background 0.15s;
+  transition: none;
+  user-select: none;
 }
 
 .menu-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: #d4874a;
+  color: #fff;
+}
+
+.menu-item:active {
+  background: #c0733a;
+  color: #fff;
 }
 
 .menu-icon {
@@ -31,8 +42,12 @@
   font-size: 14px;
 }
 
+.menu-label {
+  flex: 1;
+}
+
 .menu-divider {
-  height: 1px;
-  background: rgba(255, 255, 255, 0.1);
-  margin: 4px 0;
+  height: 2px;
+  background: #d4b87a;
+  margin: 4px 8px;
 }

@@ -8,20 +8,26 @@ import path from 'path'
 import { getConfig, setConfig } from './store'
 
 const EDGE_THRESHOLD = 20   // 距屏幕边缘多少像素触发收起
-const CAT_W = 140           // 猫咪窗口宽度
-const CAT_H = 180           // 猫咪窗口高度（含气泡展开余量）
+const CAT_W = 320           // 猫咪窗口宽度
+const CAT_H = 500           // 猫咪窗口高度（含气泡展开余量）
 const HIDDEN_PEEK = 8       // 收起后露出的像素数（猫耳）
 
 let mainWindow: BrowserWindow | null = null
 let settingsWindow: BrowserWindow | null = null
+let logWindow: BrowserWindow | null = null
 
 const isDev = !app.isPackaged
 
-function getRendererURL(page = ''): string {
+/**
+ * 获取渲染进程 URL
+ * @param hash 可选 hash 路由，如 '/settings'（不含 #）
+ */
+function getRendererURL(hash = ''): string {
+  const hashPart = hash ? `#${hash}` : ''
   if (isDev) {
-    return `http://localhost:5173/${page}`
+    return `http://localhost:5173/${hashPart}`
   }
-  return `file://${path.join(__dirname, '../../dist/index.html')}${page ? `#${page}` : ''}`
+  return `file://${path.join(__dirname, '../../dist/index.html')}${hashPart}`
 }
 
 // ── 主窗口（像素猫） ───────────────────────────
@@ -55,13 +61,20 @@ export function createMainWindow(): BrowserWindow {
   })
 
   mainWindow.loadURL(getRendererURL())
-  mainWindow.setIgnoreMouseEvents(false)
+
+  // 默认透明区域穿透点击，{ forward: true } 保证 mousemove 仍然转发给渲染进程
+  mainWindow.setIgnoreMouseEvents(true, { forward: true })
+
+  // 渲染进程通过 mousemove + elementFromPoint 检测光标是否在可见元素上
+  // 进入可见元素时发 false，离开时发 true
+  ipcMain.on('window:set-ignore-mouse-events', (_e, ignore: boolean) => {
+    mainWindow?.setIgnoreMouseEvents(ignore, { forward: true })
+  })
 
   // 注册窗口拖动 IPC（手动实现拖动）
   ipcMain.on('window:drag-start', () => {
-    if (mainWindow) {
-      mainWindow.setIgnoreMouseEvents(true)
-    }
+    // 拖动开始时确保鼠标事件不被忽略
+    mainWindow?.setIgnoreMouseEvents(false)
   })
 
   ipcMain.on('window:drag-move', (_e, deltaX: number, deltaY: number) => {
@@ -73,10 +86,11 @@ export function createMainWindow(): BrowserWindow {
 
   ipcMain.on('window:drag-end', () => {
     if (mainWindow) {
-      mainWindow.setIgnoreMouseEvents(false)
       const [wx, wy] = mainWindow.getPosition()
       setConfig({ cat_position: { x: wx, y: wy } })
       checkEdgeHide(wx, wy)
+      // 拖动结束后恢复透明穿透
+      mainWindow.setIgnoreMouseEvents(true, { forward: true })
     }
   })
 
@@ -123,14 +137,24 @@ function checkEdgeHide(wx: number, wy: number): void {
   }
 }
 
-/** 从托盘/鼠标悬停时把猫展开回来 */
+/** 从托盘点击时显示猫咪，只在猫被收起到边缘时才复位到右下角 */
 export function showMainWindow(): void {
   if (!mainWindow) return
-  const display = screen.getPrimaryDisplay()
-  const { width: sw, height: sh } = display.workAreaSize
-  mainWindow.setPosition(sw - CAT_W - 20, sh - CAT_H - 20)
+  const config = getConfig()
+
+  if (config.cat_hidden) {
+    // 收起状态，恢复到屏幕右下角
+    const display = screen.getPrimaryDisplay()
+    const { width: sw, height: sh } = display.workAreaSize
+    const x = sw - CAT_W - 20
+    const y = sh - CAT_H - 20
+    mainWindow.setPosition(x, y)
+    setConfig({ cat_hidden: false, cat_position: { x, y } })
+  }
+
+  // 无论如何确保窗口可见并获得焦点
   mainWindow.show()
-  setConfig({ cat_hidden: false, cat_position: { x: sw - CAT_W - 20, y: sh - CAT_H - 20 } })
+  mainWindow.focus()
 }
 
 export function getMainWindow(): BrowserWindow | null {
@@ -146,7 +170,7 @@ export function openSettingsWindow(): void {
 
   settingsWindow = new BrowserWindow({
     width: 520,
-    height: 620,
+    height: 720,
     title: '小小牛马 - 设置',
     resizable: false,
     webPreferences: {
@@ -156,9 +180,35 @@ export function openSettingsWindow(): void {
     },
   })
 
-  settingsWindow.loadURL(getRendererURL('#/settings'))
+  settingsWindow.loadURL(getRendererURL('/settings'))
 
   settingsWindow.on('closed', () => {
     settingsWindow = null
+  })
+}
+
+// ── 日志查看窗口 ──────────────────────────────────
+export function openLogWindow(): void {
+  if (logWindow && !logWindow.isDestroyed()) {
+    logWindow.focus()
+    return
+  }
+
+  logWindow = new BrowserWindow({
+    width: 560,
+    height: 680,
+    title: '小小牛马 - 工作日志',
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  logWindow.loadURL(getRendererURL('/logs'))
+
+  logWindow.on('closed', () => {
+    logWindow = null
   })
 }

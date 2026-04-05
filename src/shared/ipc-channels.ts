@@ -29,6 +29,15 @@ export const IPC = {
   TODOS_SAVE:          'renderer:todos-save',      // 保存待办
   LOGS_RANGE:          'renderer:logs-range',      // 读取时间范围内所有日志
 
+  // LLM 调用（在主进程执行，绕过 CORS）
+  LLM_PARSE_PLAN:      'renderer:llm-parse-plan',    // 解析工作计划 → TodoItem[]
+  LLM_SUMMARY:         'renderer:llm-summary',       // 生成工作总结（非流式）
+  LLM_SUMMARY_STREAM:  'main:llm-summary-chunk',     // 流式总结的增量推送
+
+  // 导出
+  EXPORT_SUMMARY_DOCX: 'renderer:export-summary-docx',  // 导出总结为 Word 文档
+  SELECT_DIRECTORY:     'renderer:select-directory',     // 打开目录选择器
+
   // 窗口行为
   WINDOW_DRAG:         'renderer:window-drag',     // 拖动窗口（发送鼠标偏移）
   WINDOW_HIDE_EDGE:    'renderer:window-hide-edge',
@@ -37,7 +46,9 @@ export const IPC = {
   // 系统
   AUTO_LAUNCH_SET:     'renderer:auto-launch-set',
   SNOOZE_BREAK:        'renderer:snooze-break',    // 再等一会儿
+  BREAK_DONE:          'renderer:break-done',      // 确认去休息，重置计时
   OPEN_SETTINGS:       'renderer:open-settings',
+  OPEN_LOGS:           'renderer:open-logs',
 } as const
 
 export type IPCChannel = typeof IPC[keyof typeof IPC]

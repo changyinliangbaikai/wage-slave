@@ -1,7 +1,8 @@
 /**
  * 定时触发器
- * 每分钟检查一次当前时间，到达上班/下班时间时触发对应事件
- * 使用 powerMonitor 监听睡眠/唤醒，唤醒后立即补检
+ * 每 30 秒检查一次，判断"今天的上班/下班时间点是否已过且尚未触发"。
+ * 相比精确分钟匹配，这种区间检测能容忍 interval 漂移和休眠唤醒的时间跳跃，
+ * 不会因错过某一分钟而永久丢失当天触发。
  */
 
 import { powerMonitor } from 'electron'
@@ -12,17 +13,12 @@ type TriggerCallback = (type: 'morning' | 'evening', date: string, hasTodos: boo
 let intervalId: NodeJS.Timeout | null = null
 let onTrigger: TriggerCallback | null = null
 
-/** 解析 "HH:mm" → { hour, minute } */
-function parseTime(t: string): { hour: number; minute: number } {
-  const [h, m] = t.split(':').map(Number)
-  return { hour: h, minute: m }
-}
-
-/** 当前时间是否匹配目标时间（精确到分钟） */
-function isNow(target: string): boolean {
-  const now = new Date()
-  const { hour, minute } = parseTime(target)
-  return now.getHours() === hour && now.getMinutes() === minute
+/** 解析 "HH:mm" → 今天该时间点的 Date 对象 */
+function todayAt(hhmm: string): Date {
+  const [h, m] = hhmm.split(':').map(Number)
+  const d = new Date()
+  d.setHours(h, m, 0, 0)
+  return d
 }
 
 /** 是否为周末 */
@@ -31,22 +27,39 @@ function isWeekend(): boolean {
   return day === 0 || day === 6
 }
 
+/**
+ * 检查是否需要触发晨间/晚间事件。
+ * 触发条件：目标时间点已过（当前时间 >= 目标时间）且今天还未触发过。
+ * 上限保护：超过目标时间 2 小时后不再补触发（避免用户第二天开机时错误触发昨天的事件）。
+ */
 function check(): void {
   if (isWeekend()) return
 
   const config = getConfig()
   const state = getDailyState()
   const today = todayStr()
+  const now = Date.now()
+  const TWO_HOURS = 2 * 60 * 60 * 1000
 
   // 晨间检查
-  if (isNow(config.work_start) && state.morning_triggered_date !== today) {
+  const morningTime = todayAt(config.work_start).getTime()
+  if (
+    now >= morningTime &&
+    now < morningTime + TWO_HOURS &&
+    state.morning_triggered_date !== today
+  ) {
     setDailyState({ morning_triggered_date: today })
     const hasTodos = (getLog(today)?.todos.length ?? 0) > 0
     onTrigger?.('morning', today, hasTodos)
   }
 
   // 晚间检查
-  if (isNow(config.work_end) && state.evening_triggered_date !== today) {
+  const eveningTime = todayAt(config.work_end).getTime()
+  if (
+    now >= eveningTime &&
+    now < eveningTime + TWO_HOURS &&
+    state.evening_triggered_date !== today
+  ) {
     setDailyState({ evening_triggered_date: today })
     const hasTodos = (getLog(today)?.todos.length ?? 0) > 0
     onTrigger?.('evening', today, hasTodos)
@@ -56,8 +69,8 @@ function check(): void {
 export function startScheduler(cb: TriggerCallback): void {
   onTrigger = cb
 
-  // 每分钟检查一次
-  intervalId = setInterval(check, 60 * 1000)
+  // 每 30 秒检查一次，保证即使 interval 轻微漂移也能在 1 分钟内触发
+  intervalId = setInterval(check, 30 * 1000)
 
   // 睡眠唤醒后立即检查（处理电脑长时间休眠跳过触发时间的情况）
   powerMonitor.on('resume', () => {
