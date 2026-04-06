@@ -48,7 +48,6 @@ jobs:
       - name: 安装依赖
         shell: bash
         run: |
-          npm config set python $(python -c "import sys; print(sys.executable)")
           npm install
 
       # 重新编译 uiohook-napi native binding（针对当前 Electron 版本）
