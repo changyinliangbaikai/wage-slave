@@ -14,6 +14,10 @@ on:
         type: boolean
         default: false
 
+env:
+  # 让 GitHub Actions 内部使用 Node.js 24 运行 action 脚本，消除 deprecation 警告
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ── Windows 构建 ───────────────────────────────────────
   build-windows:
@@ -27,8 +31,14 @@ jobs:
       - name: 配置 Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
+
+      # 配置 Python 3.11（Python 3.12+ 移除了 distutils，node-gyp 需要它）
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       # 安装依赖（包括 native 模块的 Windows 编译）
       - name: 安装依赖
@@ -36,7 +46,7 @@ jobs:
 
       # 重新编译 uiohook-napi native binding（针对当前 Electron 版本）
       - name: 重编译 uiohook-napi
-        run: npx electron-rebuild -f -w uiohook-napi
+        run: npx @electron/rebuild -f -w uiohook-napi
 
       # 构建（编译 TypeScript + Vite 打包前端）
       - name: 构建项目
