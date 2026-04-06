@@ -40,27 +40,76 @@ jobs:
         with:
           python-version: '3.11'
 
+      # 配置 Windows 构建工具
+      - name: 配置 Windows 构建工具
+        uses: microsoft/setup-msbuild@v2
+
+      # 设置 npm 配置
+      - name: 配置 npm
+        run: npm config set msvs_version 2019
+
       # 安装依赖（包括 native 模块的 Windows 编译）
       - name: 安装依赖
-        run: npm ci
+        run: |
+          npm config set python $(python -c "import sys; print(sys.executable)")
+          npm install
 
       # 重新编译 uiohook-napi native binding（针对当前 Electron 版本）
       - name: 重编译 uiohook-napi
-        run: npx @electron/rebuild -f -w uiohook-napi
+        run: |
+          echo "正在重新编译 uiohook-napi..."
+          npx @electron/rebuild -f -w uiohook-napi --verbose
+          echo "uiohook-napi 编译完成"
 
       # 构建（编译 TypeScript + Vite 打包前端）
       - name: 构建项目
-        run: npm run build
+        run: |
+          echo "开始构建项目..."
+          npm run build
+          echo "项目构建完成"
 
       # 打包为 Windows 安装包
       # 如需代码签名，在此步骤前配置证书（见下方注释）
       - name: 打包 Windows 安装包
-        run: npm run dist
+        run: |
+          echo "开始打包 Windows 安装包..."
+          echo "当前工作目录："
+          pwd
+          echo "项目结构："
+          ls -la
+          echo "dist-electron 目录："
+          ls -la dist-electron/ || echo "dist-electron 目录不存在"
+          echo "dist 目录："
+          ls -la dist/ || echo "dist 目录不存在"
+          npm run dist
+          echo "Windows 安装包打包完成"
+          echo "release 目录内容："
+          ls -la release/ || echo "release 目录不存在"
         env:
           # 如果配置了代码签名证书，取消以下注释并在 Secrets 中配置
           # CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           # CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 如果构建失败，收集调试信息
+      - name: 收集调试信息
+        if: failure()
+        run: |
+          echo "构建失败，收集调试信息..."
+          echo "Node.js 版本："
+          node --version
+          echo "npm 版本："
+          npm --version
+          echo "Python 版本："
+          python --version
+          echo "当前工作目录："
+          pwd
+          echo "项目文件："
+          ls -la
+          echo "npm 错误日志："
+          cat npm-debug.log || echo "没有 npm 错误日志"
+          echo "Electron 构建日志："
+          find . -name "*.log" -exec echo "=== {} ===" \; -exec cat {} \;
 
       # 上传安装包为 Artifact（每次构建都可下载，无论是否发布 Release）
       - name: 上传安装包 Artifact
@@ -70,7 +119,10 @@ jobs:
           path: |
             release/*.exe
             release/*.msi
+            release/**/*.exe
+            release/**/*.msi
           retention-days: 30
+        continue-on-error: true
 
   # ── 发布 Release（仅 tag 推送时执行）──────────────────
   release:
@@ -89,6 +141,12 @@ jobs:
           pattern: xiao-niu-ma-windows-*
           merge-multiple: true
           path: ./release-files
+
+      - name: 检查下载的文件
+        run: |
+          echo "下载的构建产物："
+          ls -la ./release-files/
+          find ./release-files/ -type f -name "*.exe" -o -name "*.msi"
 
       - name: 读取版本号
         id: version
