@@ -44,18 +44,16 @@ jobs:
       - name: 配置 Windows 构建工具
         uses: microsoft/setup-msbuild@v2
 
-      # 设置 npm 配置
-      - name: 配置 npm
-        run: npm config set msvs_version 2019
-
       # 安装依赖（包括 native 模块的 Windows 编译）
       - name: 安装依赖
+        shell: bash
         run: |
           npm config set python $(python -c "import sys; print(sys.executable)")
           npm install
 
       # 重新编译 uiohook-napi native binding（针对当前 Electron 版本）
       - name: 重编译 uiohook-napi
+        shell: bash
         run: |
           echo "正在重新编译 uiohook-napi..."
           npx @electron/rebuild -f -w uiohook-napi --verbose
@@ -63,6 +61,7 @@ jobs:
 
       # 构建（编译 TypeScript + Vite 打包前端）
       - name: 构建项目
+        shell: bash
         run: |
           echo "开始构建项目..."
           npm run build
@@ -71,6 +70,7 @@ jobs:
       # 打包为 Windows 安装包
       # 如需代码签名，在此步骤前配置证书（见下方注释）
       - name: 打包 Windows 安装包
+        shell: bash
         run: |
           echo "开始打包 Windows 安装包..."
           echo "当前工作目录："
@@ -94,6 +94,7 @@ jobs:
       # 如果构建失败，收集调试信息
       - name: 收集调试信息
         if: failure()
+        shell: bash
         run: |
           echo "构建失败，收集调试信息..."
           echo "Node.js 版本："
@@ -143,6 +144,7 @@ jobs:
           path: ./release-files
 
       - name: 检查下载的文件
+        shell: bash
         run: |
           echo "下载的构建产物："
           ls -la ./release-files/
