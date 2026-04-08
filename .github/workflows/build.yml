@@ -23,6 +23,8 @@ jobs:
   build-windows:
     name: Build Windows Installer
     runs-on: windows-latest
+    permissions:
+      contents: read
 
     steps:
       - name: 检出代码
@@ -84,11 +86,8 @@ jobs:
           echo "Windows 安装包打包完成"
           echo "release 目录内容："
           ls -la release/ || echo "release 目录不存在"
-        env:
-          # 如果配置了代码签名证书，取消以下注释并在 Secrets 中配置
-          # CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          # CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 注意：不在这里设置 GH_TOKEN，防止 electron-builder 自动发布到 GitHub
+          # release job 会负责创建 GitHub Release
 
       # 如果构建失败，收集调试信息
       - name: 收集调试信息
@@ -130,6 +129,8 @@ jobs:
     needs: build-windows
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
 
     steps:
       - name: 检出代码
