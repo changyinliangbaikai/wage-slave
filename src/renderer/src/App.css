@@ -64,6 +64,7 @@ body {
   gap: 4px;
   max-height: 180px;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .todo-item {
@@ -81,7 +82,7 @@ body {
 }
 
 .todo-check { font-size: 13px; color: #d4874a; flex-shrink: 0; }
-.todo-title { flex: 1; }
+.todo-title { flex: 1; word-break: break-word; overflow-wrap: break-word; }
 
 /* 待办可点击态（查看今日待办气泡中） */
 .todo-item-clickable {
@@ -108,6 +109,7 @@ body {
   gap: 6px;
   max-height: 160px;
   overflow-y: auto;
+  overflow-x: hidden;
   margin-bottom: 4px;
 }
 
@@ -137,6 +139,7 @@ body {
 .summary-preview {
   max-height: 200px;
   overflow-y: auto;
+  overflow-x: hidden;
   margin-bottom: 8px;
   padding: 6px;
   background: #fff;
@@ -167,4 +170,40 @@ body {
   background: #fffde0;
   border: 1px solid #d4b87a;
   word-break: break-all;
+}
+
+/* ── Cross-platform custom scrollbar (Windows compatible) ── */
+.todos-display,
+.todo-review-list,
+.summary-preview {
+  /* Standard properties (Firefox) */
+  scrollbar-width: thin;
+  scrollbar-color: #d4b87a #fffef0;
+}
+
+/* WebKit scrollbar (Chrome / Electron) */
+.todos-display::-webkit-scrollbar,
+.todo-review-list::-webkit-scrollbar,
+.summary-preview::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.todos-display::-webkit-scrollbar-track,
+.todo-review-list::-webkit-scrollbar-track,
+.summary-preview::-webkit-scrollbar-track {
+  background: #fffef0;
+}
+
+.todos-display::-webkit-scrollbar-thumb,
+.todo-review-list::-webkit-scrollbar-thumb,
+.summary-preview::-webkit-scrollbar-thumb {
+  background: #d4b87a;
+  border: 1px solid #fffef0;
+}
+
+.todos-display::-webkit-scrollbar-thumb:hover,
+.todo-review-list::-webkit-scrollbar-thumb:hover,
+.summary-preview::-webkit-scrollbar-thumb:hover {
+  background: #c0a060;
 }

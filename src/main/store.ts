@@ -92,18 +92,29 @@ export function getLog(date: string): DailyLog | null {
 }
 
 export function saveLog(log: Partial<DailyLog> & { date: string }): DailyLog {
-  const file = path.join(LOGS_DIR, `${log.date}.json`)
+  const { date, ...logRest } = log
+  const file = path.join(LOGS_DIR, `${date}.json`)
   const existing = readJSON<DailyLog | null>(file, null)
+  const now = new Date().toISOString()
+
+  // created_at：录入工作计划（plan_input）时刷新；首次创建时初始化
+  // updated_at：录入晚间日志（eod_log）时刷新；首次创建时初始化
+  const hasPlanInput = 'plan_input' in logRest
+  const hasEodLog   = 'eod_log' in logRest
+
   const updated: DailyLog = {
-    date: log.date,
+    date,
     plan_input: '',
     todos: [],
     morning_skipped: false,
     eod_log: '',
-    created_at: existing?.created_at ?? new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    ...existing,
-    ...log,
+    created_at: now,    // 首次创建兜底，后续由下方逻辑覆盖
+    updated_at: now,    // 首次创建兜底，后续由下方逻辑覆盖
+    ...existing,        // 保留已有记录的各字段及时间戳
+    ...logRest,         // 应用本次传入的字段（不含 date）
+    // 按语义精准刷新时间戳：有计划录入则刷新 created_at，有晚间日志则刷新 updated_at
+    ...(hasPlanInput && { created_at: now }),
+    ...(hasEodLog   && { updated_at: now }),
   }
   atomicWrite(file, updated)
   return updated

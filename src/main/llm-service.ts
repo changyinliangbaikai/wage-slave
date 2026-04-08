@@ -144,14 +144,15 @@ export async function parsePlan(input: string, apiKey: string): Promise<{ todos:
         temperature: 0.2,
         max_tokens: 800,
       }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(60000),
     })
 
     if (!res.ok) {
       const text = await res.text().catch(() => '')
       const errMsg = `API 返回 ${res.status}: ${text.slice(0, 120)}`
       console.error('[LLM]', errMsg)
-      return { todos: makeFallback(input), error: errMsg }
+      // 有 API Key 但请求失败，返回空列表让前端进入失败状态
+      return { todos: [], error: errMsg }
     }
 
     const data = await res.json()
@@ -162,7 +163,9 @@ export async function parsePlan(input: string, apiKey: string): Promise<{ todos:
     const parsed = JSON.parse(jsonStr)
 
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      return { todos: makeFallback(input), error: 'LLM 返回格式异常，使用简单拆分' }
+      const errMsg = 'LLM 返回格式异常，请重试'
+      console.error('[LLM]', errMsg, '原始内容：', raw.slice(0, 200))
+      return { todos: [], error: errMsg }
     }
 
     const todos: TodoItem[] = parsed.map((item: Record<string, unknown>, i: number) => ({
@@ -181,7 +184,8 @@ export async function parsePlan(input: string, apiKey: string): Promise<{ todos:
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     console.error('[LLM] 解析失败：', msg)
-    return { todos: makeFallback(input), error: msg }
+    // 有 API Key 但调用失败（超时/网络等），返回空列表让前端进入失败状态
+    return { todos: [], error: msg }
   }
 }
 

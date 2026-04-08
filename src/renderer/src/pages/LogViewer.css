@@ -6,6 +6,8 @@
   color: #3a1a04;
   background: #fffef5;
   min-height: 100vh;
+  /* Override App.css body user-select:none for the log viewer */
+  user-select: text;
 }
 
 .log-title {
@@ -103,6 +105,29 @@
   font-weight: normal;
   font-size: 12px;
   color: #d4874a;
+}
+
+/* 一键复制按钮 */
+.copy-btn {
+  margin-left: auto;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  border: 1px solid #d4b87a;
+  background: #fffde0;
+  color: #8b5e3c;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.12s, color 0.12s;
+  user-select: none;
+}
+.copy-btn:hover { background: #f0e8c0; color: #3a1a04; }
+.copy-btn:active { background: #e8d4a0; }
+
+/* 可选中文本（原始计划） */
+.log-text-selectable {
+  user-select: text;
+  cursor: text;
 }
 
 .log-text {

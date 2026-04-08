@@ -3,7 +3,7 @@
  * 在独立窗口中展示，支持按日期浏览
  */
 
-import { useState, useEffect, useLayoutEffect } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import type { DailyLog } from '@shared/types'
 import './LogViewer.css'
 
@@ -13,6 +13,19 @@ const api = (window as any).electronAPI
 function formatWeekday(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00')
   return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()]
+}
+
+/** 将 ISO UTC 时间字符串转换为本地时间显示（YYYY-MM-DD HH:mm） */
+function formatTimestamp(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  const h = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  return `${y}-${mo}-${day} ${h}:${mi}`
 }
 
 /** 用本地时间生成 YYYY-MM-DD，避免 toISOString 的 UTC 时区偏移 */
@@ -38,6 +51,22 @@ export default function LogViewer() {
   const [date, setDate] = useState(todayStr())
   const [log, setLog] = useState<DailyLog | null>(null)
   const [loading, setLoading] = useState(false)
+  const [copyTip, setCopyTip] = useState('')
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 一键复制文本到剪贴板，2 秒后自动清除提示
+  const handleCopy = useCallback(async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      console.log('[LogViewer] Copied to clipboard, length:', text.length)
+      setCopyTip('已复制')
+    } catch {
+      setCopyTip('复制失败')
+    } finally {
+      if (copyTimer.current) clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopyTip(''), 2000)
+    }
+  }, [])
 
   // 覆盖 App.css 的 body overflow:hidden
   useLayoutEffect(() => {
@@ -91,8 +120,17 @@ export default function LogViewer() {
           {/* 计划原文 */}
           {log.plan_input && (
             <section className="log-section">
-              <h2>原始计划</h2>
-              <p className="log-text">{log.plan_input}</p>
+              <h2>
+                原始计划
+                <button
+                  className="copy-btn"
+                  onClick={() => handleCopy(log.plan_input)}
+                  title="复制原始计划"
+                >
+                  {copyTip || '复制'}
+                </button>
+              </h2>
+              <p className="log-text log-text-selectable">{log.plan_input}</p>
             </section>
           )}
 
@@ -135,9 +173,9 @@ export default function LogViewer() {
 
           {/* 时间戳 */}
           <div className="log-timestamps">
-            <span>创建：{log.created_at?.slice(0, 16).replace('T', ' ')}</span>
+            <span>创建：{formatTimestamp(log.created_at)}</span>
             {log.updated_at && log.updated_at !== log.created_at && (
-              <span>更新：{log.updated_at?.slice(0, 16).replace('T', ' ')}</span>
+              <span>更新：{formatTimestamp(log.updated_at)}</span>
             )}
           </div>
         </div>
