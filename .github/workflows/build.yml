@@ -154,11 +154,25 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: 读取 CHANGELOG
+        id: changelog
+        run: |
+          if [ -f "CHANGELOG.md" ]; then
+            # 提取对应版本的更新内容（从版本号到下一个版本号之间）
+            echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
+            awk "/^## \[?${{ steps.version.outputs.VERSION }}\]?/,/^## \[?[0-9]/" CHANGELOG.md | head -n -1 >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
+            echo "暂无更新日志" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+
       - name: 创建 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: 小小牛马 v${{ steps.version.outputs.VERSION }}
-          draft: ${{ github.event.inputs.draft == 'true' }}
+          draft: false  # tag 推送时自动发布，不创建草稿
           prerelease: false
           files: ./release-files/*
           body: |
@@ -176,5 +190,9 @@ jobs:
             ### 注意事项
             - 首次运行需在设置中配置 LLM API Key
             - 如休息提醒不生效，请在 Windows 安全中心将应用加入白名单
+
+            ---
+            ### 更新内容
+            ${{ steps.changelog.outputs.CHANGELOG_CONTENT }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
