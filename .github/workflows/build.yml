@@ -160,7 +160,8 @@ jobs:
           if [ -f "CHANGELOG.md" ]; then
             # 提取对应版本的更新内容（从版本号到下一个版本号之间）
             echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
-            awk "/^## \[?${{ steps.version.outputs.VERSION }}\]?/,/^## \[?[0-9]/" CHANGELOG.md | head -n -1 >> $GITHUB_OUTPUT
+            # 使用 sed 提取版本号后的所有内容，直到下一个版本号
+            sed -n "/## \[${{ steps.version.outputs.VERSION }}\]/,/^## /p" CHANGELOG.md | head -n -1 >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
