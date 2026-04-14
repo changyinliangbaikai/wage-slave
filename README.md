@@ -4,7 +4,7 @@
 
 一只陪你上班的桌面像素橘猫助手
 
-![像素猫预览](imgs/cat_happy_2.png)
+![像素猫预览](docs/imgs/cat_happy_2.png)
 
 ---
 
