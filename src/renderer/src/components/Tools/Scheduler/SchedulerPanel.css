@@ -1,0 +1,544 @@
+/* 定时任务面板样式 */
+
+.scheduler-panel {
+  background: rgba(255, 255, 255, 0.95);
+  border: 3px solid #5a4a3a;
+  border-radius: 12px;
+  padding: 16px;
+  width: 100%;
+  font-family: 'Microsoft YaHei', sans-serif;
+  color: #3a2a1a;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+}
+
+/* panel-header 已在 ToolsPanel.css 中定义公共样式 */
+
+.btn-new-task {
+  margin-left: auto;
+  background: #6b8e5a;
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  font-weight: bold;
+}
+
+.btn-new-task:hover {
+  background: #5a7d49;
+}
+
+/* ── 空状态 ─────────────────────────────────── */
+
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: #8a7a6a;
+}
+
+.empty-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+}
+
+.empty-state p {
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+
+.btn-new-task-large {
+  background: #6b8e5a;
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: bold;
+}
+
+.btn-new-task-large:hover {
+  background: #5a7d49;
+}
+
+/* ── 任务列表 ───────────────────────────────── */
+
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-card {
+  background: #fffef8;
+  border: 2px solid #d4c4a0;
+  border-radius: 8px;
+  padding: 12px;
+  transition: border-color 0.2s;
+}
+
+.task-card:hover {
+  border-color: #8b7355;
+}
+
+.task-card.disabled {
+  opacity: 0.65;
+  background: #f5f0e6;
+}
+
+.task-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.task-status {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.task-name {
+  font-size: 15px;
+  font-weight: bold;
+  color: #3a2a1a;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-enable-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.task-enable-badge.on {
+  background: #e0f5e0;
+  color: #4a7a3a;
+}
+
+.task-enable-badge.off {
+  background: #f0e0e0;
+  color: #8a4a3a;
+}
+
+.task-info {
+  font-size: 12px;
+  color: #6a5a4a;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+}
+
+.info-label {
+  color: #8a7a6a;
+  margin-right: 4px;
+}
+
+.task-command code {
+  background: #f0ece4;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.task-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-action {
+  padding: 4px 8px;
+  border: 1px solid #d4c4a0;
+  background: #fffef8;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-family: inherit;
+  color: #5a4a3a;
+  transition: all 0.15s;
+}
+
+.btn-action:hover {
+  background: #f0ece4;
+  border-color: #8b7355;
+}
+
+.btn-run:hover { background: #e8f5e0; border-color: #6b8e5a; }
+.btn-delete:hover { background: #fce8e8; border-color: #c44; color: #c44; }
+
+/* ── 表单 ───────────────────────────────────── */
+
+.task-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.form-group label {
+  font-size: 13px;
+  font-weight: bold;
+  color: #5a4a3a;
+}
+
+.form-row {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.form-input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 2px solid #c4a87a;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  background: #fffef8;
+  color: #3a2a1a;
+  box-sizing: border-box;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: #8b7355;
+}
+
+.form-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 2px solid #c4a87a;
+  border-radius: 6px;
+  font-family: 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  background: #fffef8;
+  color: #3a2a1a;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.form-textarea:focus {
+  outline: none;
+  border-color: #8b7355;
+}
+
+.dir-select-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dir-input {
+  flex: 1;
+}
+
+.btn-browse {
+  background: #8b7355;
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+
+.btn-browse:hover {
+  background: #6b5345;
+}
+
+/* 调度方式选项卡 */
+.schedule-type-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.schedule-tab {
+  flex: 1;
+  padding: 6px 8px;
+  border: 2px solid #c4a87a;
+  background: #f5f0e6;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  color: #5a4a3a;
+  text-align: center;
+  transition: all 0.2s;
+}
+
+.schedule-tab:hover {
+  background: #ebe3d5;
+}
+
+.schedule-tab.active {
+  background: #8b7355;
+  color: white;
+  border-color: #6b5345;
+}
+
+.schedule-detail {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: #5a4a3a;
+}
+
+.form-input-small {
+  width: 100px;
+  padding: 6px 8px;
+  border: 2px solid #c4a87a;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  background: #fffef8;
+  color: #3a2a1a;
+  text-align: center;
+}
+
+.form-input-small:focus {
+  outline: none;
+  border-color: #8b7355;
+}
+
+.form-select {
+  padding: 6px 8px;
+  border: 2px solid #c4a87a;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  background: #fffef8;
+  color: #3a2a1a;
+}
+
+.form-select:focus {
+  outline: none;
+  border-color: #8b7355;
+}
+
+.form-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #6b8e5a;
+  cursor: pointer;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.btn-save {
+  flex: 1;
+  padding: 10px;
+  background: #6b8e5a;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+  font-weight: bold;
+}
+
+.btn-save:hover:not(:disabled) {
+  background: #5a7d49;
+}
+
+.btn-save:disabled {
+  background: #a0a0a0;
+  cursor: not-allowed;
+}
+
+.btn-cancel {
+  padding: 10px 20px;
+  background: #8b7355;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.btn-cancel:hover {
+  background: #6b5345;
+}
+
+/* ── 日志列表 ───────────────────────────────── */
+
+.btn-clear-logs {
+  margin-left: auto;
+  background: #c44;
+  color: white;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.btn-clear-logs:hover {
+  background: #a33;
+}
+
+.log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-item {
+  background: #fffef8;
+  border: 1px solid #d4c4a0;
+  border-radius: 6px;
+  padding: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.log-item:hover {
+  border-color: #8b7355;
+  background: #faf8f0;
+}
+
+.log-item-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+.status-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: bold;
+}
+
+.badge-running {
+  background: #e0ecff;
+  color: #3a5a9a;
+}
+
+.badge-success {
+  background: #e0f5e0;
+  color: #3a7a3a;
+}
+
+.badge-failed {
+  background: #fce8e8;
+  color: #9a3a3a;
+}
+
+.log-time {
+  font-size: 12px;
+  color: #6a5a4a;
+}
+
+.log-duration {
+  font-size: 11px;
+  color: #8a7a6a;
+  margin-left: auto;
+}
+
+.log-preview {
+  font-size: 11px;
+  color: #8a7a6a;
+  font-family: 'Menlo', 'Consolas', monospace;
+  background: #f5f0e6;
+  padding: 4px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── 日志详情 ───────────────────────────────── */
+
+.log-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.log-detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #f5f0e6;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.meta-label {
+  color: #8a7a6a;
+  min-width: 70px;
+  flex-shrink: 0;
+}
+
+.exit-ok { color: #3a7a3a; font-weight: bold; }
+.exit-err { color: #c44; font-weight: bold; }
+
+.log-output-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-output-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.log-output-header h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #5a4a3a;
+}
+
+.log-output {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 12px;
+  border-radius: 8px;
+  font-family: 'Menlo', 'Consolas', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 400px;
+  overflow-y: auto;
+  margin: 0;
+  user-select: text;
+  -webkit-user-select: text;
+}

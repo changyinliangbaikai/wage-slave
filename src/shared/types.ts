@@ -75,3 +75,97 @@ export interface LLMConfig {
   api_url: string
   model: string
 }
+
+// ─────────────────────────────────────────────
+// 小工具模块类型
+// ─────────────────────────────────────────────
+
+/** 错别字检查结果项 */
+export interface SpellCheckError {
+  /** 错误文字在原文中的起始位置 */
+  start: number
+  /** 错误文字在原文中的结束位置 */
+  end: number
+  /** 原文（错误部分） */
+  original: string
+  /** 建议修正 */
+  correction: string
+  /** 修正理由 */
+  reason?: string
+}
+
+/** 错别字检查返回结果 */
+export interface SpellCheckResult {
+  /** 原文 */
+  originalText: string
+  /** 错误列表（无错别字时为空数组） */
+  errors: SpellCheckError[]
+  /** 修正后的文本 */
+  correctedText: string
+}
+
+/** 文件读取结果 */
+export interface FileReadResult {
+  /** 文件名 */
+  fileName: string
+  /** 文件内容 */
+  content: string
+  /** 文件类型 */
+  fileType: 'txt' | 'md' | 'docx' | 'doc'
+}
+
+// ─────────────────────────────────────────────
+// 定时任务模块类型
+// ─────────────────────────────────────────────
+
+/** 定时任务调度类型 */
+export type ScheduleType = 'interval' | 'daily' | 'weekly'
+
+/** 定时任务调度配置 */
+export interface TaskSchedule {
+  type: ScheduleType
+  /** 间隔分钟（type=interval 时使用） */
+  intervalMinutes?: number
+  /** 执行时间 HH:mm（type=daily/weekly 时使用） */
+  time?: string
+  /** 星期几 0=周日 1=周一 ... 6=周六（type=weekly 时使用） */
+  weekDay?: number
+}
+
+/** 定时任务 */
+export interface ScheduledTask {
+  id: string
+  /** 任务名称 */
+  name: string
+  /** 执行命令 */
+  command: string
+  /** 工作目录 */
+  workDir: string
+  /** 调度配置 */
+  schedule: TaskSchedule
+  /** 是否启用 */
+  enabled: boolean
+  /** 创建时间 */
+  createdAt: string
+  /** 更新时间 */
+  updatedAt: string
+  /** 最近执行时间 */
+  lastRunAt?: string
+  /** 最近执行状态 */
+  lastRunStatus?: 'success' | 'failed' | 'running'
+}
+
+/** 任务执行记录 */
+export interface TaskExecution {
+  id: string
+  taskId: string
+  taskName: string
+  startTime: string
+  endTime?: string
+  /** 进程退出码 */
+  exitCode: number | null
+  /** 合并的 stdout + stderr 输出 */
+  output: string
+  /** 执行状态 */
+  status: 'running' | 'success' | 'failed'
+}

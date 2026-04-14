@@ -15,6 +15,7 @@ const HIDDEN_PEEK = 8       // 收起后露出的像素数（猫耳）
 let mainWindow: BrowserWindow | null = null
 let settingsWindow: BrowserWindow | null = null
 let logWindow: BrowserWindow | null = null
+let toolWindow: BrowserWindow | null = null
 
 const isDev = !app.isPackaged
 
@@ -210,5 +211,31 @@ export function openLogWindow(): void {
 
   logWindow.on('closed', () => {
     logWindow = null
+  })
+}
+
+// ── 小工具窗口 ──────────────────────────────────
+export function openToolWindow(): void {
+  if (toolWindow && !toolWindow.isDestroyed()) {
+    toolWindow.focus()
+    return
+  }
+
+  toolWindow = new BrowserWindow({
+    width: 520,
+    height: 740,
+    title: '小小牛马 - 小工具',
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  toolWindow.loadURL(getRendererURL('/tools'))
+
+  toolWindow.on('closed', () => {
+    toolWindow = null
   })
 }

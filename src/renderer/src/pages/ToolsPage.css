@@ -1,0 +1,77 @@
+/* 小工具独立页面样式 */
+
+/* 覆盖全局 body overflow:hidden（猫窗口需要，工具窗口不需要） */
+body:has(.tools-page) {
+  overflow: auto;
+}
+
+.tools-page {
+  width: 100%;
+  min-height: 100vh;
+  background: #fffef0;
+  padding: 32px;
+  box-sizing: border-box;
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  overflow-y: auto;
+}
+
+/* 在独立窗口中去掉面板浮动效果，使用页面背景 */
+.tools-page .tools-panel,
+.tools-page .spell-check-panel,
+.tools-page .scheduler-panel {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  width: 100%;
+}
+
+/* 独立窗口中 grid 布局优化 */
+.tools-page .tools-grid {
+  grid-template-columns: repeat(auto-fill, 120px);
+  gap: 20px;
+  padding: 12px;
+}
+
+/* 独立窗口中放大工具卡片 */
+.tools-page .tool-card {
+  width: 120px;
+  height: 100px;
+}
+
+.tools-page .tool-icon {
+  font-size: 32px;
+  margin-bottom: 6px;
+}
+
+.tools-page .tool-name {
+  font-size: 13px;
+}
+
+/* badge 在宽间距下不再溢出 */
+.tools-page .tool-badge {
+  top: -6px;
+  right: -6px;
+  font-size: 9px;
+  padding: 2px 5px;
+}
+
+/* 独立窗口中面板 header 更大气 */
+.tools-page .panel-header {
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+}
+
+.tools-page .panel-header h3 {
+  font-size: 18px;
+}
+
+/* 独立窗口中文本输入区更大 */
+.tools-page .text-input {
+  height: 180px;
+}
+
+/* 独立窗口中错误列表不限制高度，整个页面可滚动 */
+.tools-page .errors-list {
+  max-height: none;
+}

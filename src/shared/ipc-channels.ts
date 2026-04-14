@@ -38,6 +38,21 @@ export const IPC = {
   EXPORT_SUMMARY_DOCX: 'renderer:export-summary-docx',  // 导出总结为 Word 文档
   SELECT_DIRECTORY:     'renderer:select-directory',     // 打开目录选择器
 
+  // 小工具
+  TOOLS_OPEN_FILE_DIALOG: 'renderer:tools-open-file-dialog', // 打开文件选择对话框
+  TOOLS_READ_FILE:        'renderer:tools-read-file',        // 读取本地文件内容
+  TOOLS_SPELL_CHECK:      'renderer:tools-spell-check',      // 错别字检查
+
+  // 定时任务
+  SCHEDULER_LIST_TASKS:   'renderer:scheduler-list-tasks',   // 获取任务列表
+  SCHEDULER_SAVE_TASK:    'renderer:scheduler-save-task',     // 创建/更新任务
+  SCHEDULER_DELETE_TASK:  'renderer:scheduler-delete-task',   // 删除任务
+  SCHEDULER_TOGGLE_TASK:  'renderer:scheduler-toggle-task',   // 启用/禁用任务
+  SCHEDULER_RUN_TASK:     'renderer:scheduler-run-task',      // 手动执行任务
+  SCHEDULER_GET_LOGS:     'renderer:scheduler-get-logs',      // 获取任务执行日志
+  SCHEDULER_CLEAR_LOGS:   'renderer:scheduler-clear-logs',    // 清除任务执行日志
+  SCHEDULER_SELECT_DIR:   'renderer:scheduler-select-dir',    // 选择工作目录
+
   // 窗口行为
   WINDOW_DRAG:         'renderer:window-drag',     // 拖动窗口（发送鼠标偏移）
   WINDOW_HIDE_EDGE:    'renderer:window-hide-edge',
@@ -49,6 +64,7 @@ export const IPC = {
   BREAK_DONE:          'renderer:break-done',      // 确认去休息，重置计时
   OPEN_SETTINGS:       'renderer:open-settings',
   OPEN_LOGS:           'renderer:open-logs',
+  OPEN_TOOLS:          'renderer:open-tools',
 } as const
 
 export type IPCChannel = typeof IPC[keyof typeof IPC]

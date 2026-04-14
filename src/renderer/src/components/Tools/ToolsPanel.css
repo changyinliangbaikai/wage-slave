@@ -1,0 +1,50 @@
+/* 小工具面板样式 */
+
+.tools-panel {
+  background: rgba(255, 255, 255, 0.95);
+  border: 3px solid #5a4a3a;
+  border-radius: 12px;
+  padding: 16px;
+  width: 100%;
+  font-family: 'Microsoft YaHei', sans-serif;
+  color: #3a2a1a;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px dashed #c4a87a;
+}
+
+.panel-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #5a4a3a;
+}
+
+.btn-back {
+  background: #8b7355;
+  color: white;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.btn-back:hover {
+  background: #6b5345;
+}
+
+.tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 12px;
+  justify-items: center;
+}

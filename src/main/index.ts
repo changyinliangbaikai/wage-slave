@@ -59,6 +59,13 @@ app.whenReady().then(() => {
     const win = getMainWindow()
     win?.webContents.send(IPC.TRIGGER_BREAK, { elapsed_min: elapsedMin })
   })
+
+  // 启动定时任务调度引擎
+  import('./tools/task-scheduler').then(({ startTaskScheduler }) => {
+    startTaskScheduler()
+  }).catch(err => {
+    console.error('[Main] 定时任务调度器启动失败:', err)
+  })
 })
 
 // macOS：点击 Dock 图标时重新显示窗口（本项目主要面向 Windows，预留）

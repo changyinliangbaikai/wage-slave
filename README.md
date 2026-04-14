@@ -193,18 +193,33 @@ xiao-niu-ma/
 │   │   ├── scheduler.ts       # 上下班时间定时触发器
 │   │   ├── activity-monitor.ts # 键鼠活跃监测（休息提醒）
 │   │   ├── store.ts           # 本地 JSON 数据读写（原子写入）
-│   │   └── ipc-handlers.ts    # IPC 事件处理器
+│   │   ├── ipc-handlers.ts    # IPC 事件处理器
+│   │   ├── llm-service.ts     # LLM 服务封装
+│   │   ├── docx-export.ts     # Word 文档导出功能
+│   │   └── tools/             # 工具类
+│   │       ├── index.ts
+│   │       └── spell-check.ts # 拼写检查工具
 │   ├── preload/
 │   │   └── index.ts           # 安全桥接主进程与渲染进程
 │   ├── renderer/src/          # React 前端
 │   │   ├── App.tsx            # 根组件（流程调度 + IPC 监听）
 │   │   ├── components/
 │   │   │   ├── PixelCat/      # 像素猫组件 + 动画状态机
-│   │   │   └── SpeechBubble/  # 像素风说话气泡
+│   │   │   ├── SpeechBubble/  # 像素风说话气泡
+│   │   │   ├── ContextMenu.tsx # 右键菜单组件
+│   │   │   ├── TodoList/      # 待办列表组件
+│   │   │   └── Tools/         # 工具面板组件
+│   │   │       ├── SpellCheck/
+│   │   │       ├── ToolCard.tsx
+│   │   │       ├── ToolsPanel.tsx
+│   │   │       └── index.ts
 │   │   ├── pages/
 │   │   │   ├── MorningFlow.tsx   # 晨间问候流程
 │   │   │   ├── BreakReminder.tsx # 休息提醒流程
-│   │   │   └── EveningFlow.tsx   # 晚间复盘流程
+│   │   │   ├── EveningFlow.tsx   # 晚间复盘流程
+│   │   │   ├── SummaryFlow.tsx   # 周期总结流程
+│   │   │   ├── LogViewer.tsx     # 日志查看器
+│   │   │   └── Settings.tsx      # 设置页面
 │   │   └── hooks/
 │   │       ├── useIPC.ts      # IPC 通信封装
 │   │       └── useLLM.ts      # LLM 调用（计划解析 + 流式总结）
@@ -212,6 +227,9 @@ xiao-niu-ma/
 │       ├── types.ts           # 主进程与渲染进程共享类型
 │       └── ipc-channels.ts    # IPC channel 名称常量
 └── assets/
+    ├── icon.icns              # macOS 应用图标
+    ├── icon.ico               # Windows 应用图标
+    ├── tray-icon.png          # 系统托盘图标
     └── pixel_cat/             # 像素猫 Sprite Sheet 素材
 ```
 

@@ -19,6 +19,7 @@ import {
   saveTodos,
   openSettings,
   openLogs,
+  openTools,
   notifyBreakDone,
   startWindowDrag,
   moveWindowDrag,
@@ -294,11 +295,18 @@ export default function App() {
     setForceCatState('talk')
   }, [setFlow])
 
+  const triggerTools = useCallback(() => {
+    // 打开独立工具窗口
+    openTools()
+  }, [])
+
   const ctxMenuItems: MenuItem[] = [
     { label: '录入今日计划', icon: '☀', onClick: triggerMorningPlan },
     { label: '查看今日待办', icon: '📋', onClick: showTodos },
     { label: '录入工作日志', icon: '📝', onClick: triggerManualLog },
     { label: '生成工作总结', icon: '📊', onClick: triggerSummary },
+    { divider: true },
+    { label: '小工具', icon: '🛠️', onClick: triggerTools },
     { divider: true },
     { label: '查看工作日志', icon: '📒', onClick: () => openLogs() },
     { label: '设置', icon: '⚙', onClick: () => openSettings() },

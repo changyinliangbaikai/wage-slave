@@ -4,6 +4,7 @@ import log from 'electron-log/renderer'
 import App from './App'
 import Settings from './pages/Settings'
 import LogViewer from './pages/LogViewer'
+import ToolsPage from './pages/ToolsPage'
 import './App.css'
 
 // 渲染进程日志同样写入同一文件
@@ -15,6 +16,7 @@ const hash = window.location.hash
 function RootPage() {
   if (hash === '#/settings') return <Settings />
   if (hash === '#/logs') return <LogViewer />
+  if (hash === '#/tools') return <ToolsPage />
   return <App />
 }
 

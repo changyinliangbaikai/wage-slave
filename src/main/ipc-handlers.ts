@@ -11,7 +11,7 @@ import {
   getTodos, saveTodos,
   getLogsInRange, todayStr,
 } from './store'
-import { openSettingsWindow, showMainWindow, openLogWindow } from './windows'
+import { openSettingsWindow, showMainWindow, openLogWindow, openToolWindow } from './windows'
 import { snoozeBreak, resetContinuousTime } from './activity-monitor'
 import { parsePlan, generateSummary } from './llm-service'
 import { exportSummaryDocx } from './docx-export'
@@ -117,6 +117,8 @@ export function registerIPCHandlers(): void {
 
   ipcMain.on(IPC.OPEN_LOGS, () => openLogWindow())
 
+  ipcMain.on(IPC.OPEN_TOOLS, () => openToolWindow())
+
   // ── 休息提醒交互 ──────────────────────────────
   ipcMain.on(IPC.SNOOZE_BREAK, (_e, minutes: number) => snoozeBreak(minutes))
   ipcMain.on(IPC.BREAK_DONE, () => resetContinuousTime())
@@ -165,5 +167,101 @@ export function registerIPCHandlers(): void {
     } catch (e: unknown) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
+  })
+
+  // ── 小工具：打开文件选择对话框 ──────────────
+  ipcMain.handle(IPC.TOOLS_OPEN_FILE_DIALOG, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openFile'],
+      filters: [
+        { name: '文本文件', extensions: ['txt', 'md', 'docx', 'doc'] },
+        { name: '所有文件', extensions: ['*'] },
+      ],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, canceled: true }
+    }
+    return { ok: true, filePath: result.filePaths[0] }
+  })
+
+  // ── 小工具：读取文件 ─────────────────────────
+  ipcMain.handle(IPC.TOOLS_READ_FILE, async (_e, filePath: string) => {
+    try {
+      const { readFileContent } = await import('./tools/spell-check')
+      const result = await readFileContent(filePath)
+      return { ok: true, ...result }
+    } catch (e: unknown) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  // ── 小工具：错别字检查 ───────────────────────
+  ipcMain.handle(IPC.TOOLS_SPELL_CHECK, async (_e, { text, stream }: { text: string; stream?: boolean }) => {
+    try {
+      const { spellCheck } = await import('./tools/spell-check')
+      const win = getMainWindow()
+
+      if (stream && win) {
+        // 流式模式
+        return await spellCheck(text, (accumulated) => {
+          win.webContents.send('main:tools-spell-check-chunk', accumulated)
+        })
+      } else {
+        // 非流式模式
+        return await spellCheck(text)
+      }
+    } catch (e: unknown) {
+      return { errors: [], error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  // ── 定时任务 ──────────────────────────────────
+  ipcMain.handle(IPC.SCHEDULER_LIST_TASKS, async () => {
+    const { listTasks } = await import('./tools/task-scheduler')
+    return listTasks()
+  })
+
+  ipcMain.handle(IPC.SCHEDULER_SAVE_TASK, async (_e, task) => {
+    const { saveTask } = await import('./tools/task-scheduler')
+    return saveTask(task)
+  })
+
+  ipcMain.handle(IPC.SCHEDULER_DELETE_TASK, async (_e, taskId: string) => {
+    const { deleteTask } = await import('./tools/task-scheduler')
+    return deleteTask(taskId)
+  })
+
+  ipcMain.handle(IPC.SCHEDULER_TOGGLE_TASK, async (_e, taskId: string) => {
+    const { toggleTask } = await import('./tools/task-scheduler')
+    return toggleTask(taskId)
+  })
+
+  ipcMain.handle(IPC.SCHEDULER_RUN_TASK, async (_e, taskId: string) => {
+    const { runTask } = await import('./tools/task-scheduler')
+    try {
+      return { ok: true, execution: runTask(taskId) }
+    } catch (e: unknown) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+
+  ipcMain.handle(IPC.SCHEDULER_GET_LOGS, async (_e, taskId: string) => {
+    const { getTaskLogs } = await import('./tools/task-scheduler')
+    return getTaskLogs(taskId)
+  })
+
+  ipcMain.handle(IPC.SCHEDULER_CLEAR_LOGS, async (_e, taskId: string) => {
+    const { clearTaskLogs } = await import('./tools/task-scheduler')
+    clearTaskLogs(taskId)
+    return { ok: true }
+  })
+
+  ipcMain.handle(IPC.SCHEDULER_SELECT_DIR, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择任务工作目录',
+    })
+    if (result.canceled || result.filePaths.length === 0) return ''
+    return result.filePaths[0]
   })
 }

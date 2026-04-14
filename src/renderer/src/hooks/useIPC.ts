@@ -62,6 +62,7 @@ export const exportSummaryDocx = (text: string, periodLabel: string) =>
 // ── 窗口 & 系统 ────────────────────────────────
 export const openSettings = () => api.send(IPC.OPEN_SETTINGS)
 export const openLogs = () => api.send(IPC.OPEN_LOGS)
+export const openTools = () => api.send(IPC.OPEN_TOOLS)
 export const snoozeBreak = (minutes: number) => api.send(IPC.SNOOZE_BREAK, minutes)
 export const notifyBreakDone = () => api.send(IPC.BREAK_DONE)
 
