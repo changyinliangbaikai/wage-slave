@@ -157,12 +157,18 @@ jobs:
       - name: 读取 CHANGELOG
         id: changelog
         run: |
+          echo "版本号: ${{ steps.version.outputs.VERSION }}"
           if [ -f "CHANGELOG.md" ]; then
+            echo "CHANGELOG.md 文件存在"
+            echo "文件内容预览:"
+            head -20 CHANGELOG.md
+            echo "开始提取版本内容..."
             # 提取对应版本的更新内容（从版本号到下一个版本号之间）
             echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
             # 使用 sed 提取版本号后的所有内容，直到下一个版本号
             sed -n "/## \[${{ steps.version.outputs.VERSION }}\]/,/^## /p" CHANGELOG.md | head -n -1 >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
+            echo "提取完成"
           else
             echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
             echo "暂无更新日志" >> $GITHUB_OUTPUT
