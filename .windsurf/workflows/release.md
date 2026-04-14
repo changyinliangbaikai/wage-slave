@@ -10,11 +10,43 @@ description: 发布新版本流程
 
 - 确保当前在 main 分支
 - 确保代码已提交并推送到远程
-- 确认版本号已在 package.json 中更新
 
 ## 执行步骤
 
-### 1. 更新 CHANGELOG.md
+### 1. 修改 package.json 版本号
+
+在项目根目录的 `package.json` 文件中更新版本号：
+
+```json
+{
+  "version": "版本号"
+}
+```
+
+**示例**：
+```json
+{
+  "version": "2.0.0"
+}
+```
+
+或者使用 npm 命令自动更新版本号：
+
+```bash
+# 更新主版本号（如 1.0.0 -> 2.0.0）
+npm version major
+
+# 更新次版本号（如 1.0.0 -> 1.1.0）
+npm version minor
+
+# 更新补丁版本号（如 1.0.0 -> 1.0.1）
+npm version patch
+
+# 自定义版本号
+npm version 2.0.0-pre
+```
+
+### 2. 更新 CHANGELOG.md
 
 在项目根目录的 `CHANGELOG.md` 文件中添加新版本的更新内容：
 
@@ -45,15 +77,22 @@ description: 发布新版本流程
 - Release 内容自动从 CHANGELOG 读取
 ```
 
-### 2. 提交并推送到 main 分支
+### 3. 提交并推送到 main 分支
 
 ```bash
-git add CHANGELOG.md
-git commit -m "docs: 更新 CHANGELOG - 版本号"
+git add package.json CHANGELOG.md
+git commit -m "chore: 发布版本 版本号"
 git push origin main
 ```
 
-### 3. 打 tag 并推送
+**示例**：
+```bash
+git add package.json CHANGELOG.md
+git commit -m "chore: 发布版本 2.0.0"
+git push origin main
+```
+
+### 4. 打 tag 并推送
 
 ```bash
 git tag v版本号
@@ -66,7 +105,7 @@ git tag v2.0.0
 git push origin v2.0.0
 ```
 
-### 4. 验证发布
+### 5. 验证发布
 
 - 访问 GitHub 仓库的 Actions 页面，查看构建进度
 - 构建完成后，在 Releases 页面查看新发布的版本
