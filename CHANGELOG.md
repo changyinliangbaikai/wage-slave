@@ -20,6 +20,7 @@
 - 修复 README 图片预览路径
 - 修复 GitHub Actions release 权限问题
 - 补充发布流程，添加修改 package.json 版本号步骤
+- 修复 Windows 下定时任务日志中文乱码问题
 
 ### 技术栈
 - Electron 29
