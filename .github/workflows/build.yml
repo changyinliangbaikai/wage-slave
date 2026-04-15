@@ -165,8 +165,8 @@ jobs:
             echo "开始提取版本内容..."
             # 提取对应版本的更新内容
             VERSION="${{ steps.version.outputs.VERSION }}"
-            # 使用 awk 提取从版本号到下一个版本号之间的内容
-            CONTENT=$(awk -v ver="$VERSION" '/## \['ver'/ {found=1} found {print} /^## / && !/## \['ver'/ {if(found) exit}' CHANGELOG.md | tail -n +2)
+            # 使用 sed 提取从版本号行到下一个 ## 开头的行之间的内容
+            CONTENT=$(sed -n "/## \[$VERSION\]/,/^## /p" CHANGELOG.md | head -n -1 | tail -n +2)
             echo "提取的内容:"
             echo "$CONTENT"
             echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
