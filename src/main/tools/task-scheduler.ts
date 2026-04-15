@@ -10,6 +10,7 @@ import { app, Notification } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
+import * as iconv from 'iconv-lite'
 import type { ScheduledTask, TaskExecution } from '@shared/types'
 
 // ── 存储路径 ─────────────────────────────────
@@ -170,6 +171,30 @@ function updateTaskRunStatus(taskId: string, status: 'running' | 'success' | 'fa
 
 // ── 命令执行 ─────────────────────────────────
 
+/**
+ * 智能解码子进程输出
+ * Windows cmd.exe 管道默认输出 GBK/CP936 编码，直接 toString('utf-8') 会乱码
+ * 策略：先尝试 UTF-8，若包含替换字符（说明不是合法 UTF-8）则用 iconv-lite 按 GBK 解码
+ */
+function decodeProcessOutput(buf: Buffer): string {
+  if (buf.length === 0) return ''
+
+  // 非 Windows 直接用 UTF-8
+  if (process.platform !== 'win32') return buf.toString('utf-8')
+
+  // 尝试 UTF-8 解码
+  const utf8Result = buf.toString('utf-8')
+  // U+FFFD 是 Node.js 遇到非法 UTF-8 字节时的替换字符
+  if (!utf8Result.includes('\ufffd')) {
+    console.log('[TaskScheduler] 输出编码: UTF-8')
+    return utf8Result
+  }
+
+  // 包含替换字符，说明不是合法 UTF-8，用 iconv-lite 按 GBK 解码
+  console.log('[TaskScheduler] 检测到非 UTF-8 输出，使用 GBK 解码')
+  return iconv.decode(buf, 'gbk')
+}
+
 /** 执行任务命令 */
 export function runTask(taskId: string): TaskExecution {
   const tasks = listTasks()
@@ -200,30 +225,41 @@ export function runTask(taskId: string): TaskExecution {
   const shellArgs = isWin ? ['/c', task.command] : ['-c', task.command]
   const cwd = task.workDir && fs.existsSync(task.workDir) ? task.workDir : undefined
 
-  let output = ''
+  // 收集原始 Buffer，结束后再统一解码，避免 Windows GBK 乱码
+  const outputChunks: Buffer[] = []
 
   const child = spawn(shell, shellArgs, {
     cwd,
-    env: { ...process.env },
+    env: {
+      ...process.env,
+      // Windows 下为常见程序设置 UTF-8 输出环境变量
+      ...(isWin && {
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUTF8: '1',
+      }),
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 
   runningProcesses.set(executionId, child)
 
-  // 收集标准输出
+  // 收集原始字节，不立即转字符串
   child.stdout?.on('data', (data: Buffer) => {
-    output += data.toString()
+    outputChunks.push(data)
   })
 
-  // 收集错误输出
   child.stderr?.on('data', (data: Buffer) => {
-    output += data.toString()
+    outputChunks.push(data)
   })
 
   child.on('close', (code) => {
     runningProcesses.delete(executionId)
     const status = code === 0 ? 'success' : 'failed'
     const endTime = new Date().toISOString()
+
+    // 合并 Buffer 并自动检测编码解码
+    const rawOutput = Buffer.concat(outputChunks)
+    const output = decodeProcessOutput(rawOutput)
 
     // 限制日志大小（最多保留 5000KB）
     const trimmedOutput = output.length > 5000000
@@ -254,6 +290,8 @@ export function runTask(taskId: string): TaskExecution {
   child.on('error', (err) => {
     runningProcesses.delete(executionId)
     const endTime = new Date().toISOString()
+    const rawOutput = Buffer.concat(outputChunks)
+    const output = decodeProcessOutput(rawOutput)
     updateLog(taskId, executionId, {
       endTime,
       exitCode: -1,
