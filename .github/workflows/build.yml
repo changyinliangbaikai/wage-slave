@@ -163,10 +163,14 @@ jobs:
             echo "文件内容预览:"
             head -20 CHANGELOG.md
             echo "开始提取版本内容..."
-            # 提取对应版本的更新内容（从版本号到下一个版本号之间）
+            # 提取对应版本的更新内容
+            VERSION="${{ steps.version.outputs.VERSION }}"
+            # 使用 awk 提取从版本号到下一个版本号之间的内容
+            CONTENT=$(awk -v ver="$VERSION" '/## \['ver'/ {found=1} found {print} /^## / && !/## \['ver'/ {if(found) exit}' CHANGELOG.md | tail -n +2)
+            echo "提取的内容:"
+            echo "$CONTENT"
             echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
-            # 使用 sed 提取版本号后的所有内容，直到下一个版本号
-            sed -n "/## \[${{ steps.version.outputs.VERSION }}\]/,/^## /p" CHANGELOG.md | head -n -1 >> $GITHUB_OUTPUT
+            echo "$CONTENT" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
             echo "提取完成"
           else
