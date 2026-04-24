@@ -63,6 +63,7 @@ export const exportSummaryDocx = (text: string, periodLabel: string) =>
 export const openSettings = () => api.send(IPC.OPEN_SETTINGS)
 export const openLogs = () => api.send(IPC.OPEN_LOGS)
 export const openTools = () => api.send(IPC.OPEN_TOOLS)
+export const openAIChat = () => api.send(IPC.OPEN_AI_CHAT)
 export const snoozeBreak = (minutes: number) => api.send(IPC.SNOOZE_BREAK, minutes)
 export const notifyBreakDone = () => api.send(IPC.BREAK_DONE)
 

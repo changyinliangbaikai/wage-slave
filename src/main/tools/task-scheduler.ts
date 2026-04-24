@@ -48,6 +48,8 @@ let schedulerInterval: NodeJS.Timeout | null = null
 const WEEK_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 // 记录调度引擎启动时间，用于跳过启动前已错过的任务
 let schedulerStartTime: Date | null = null
+// 启动期内"已错过并打印过跳过日志"的任务 ID，避免每 30s 重复刷屏
+const loggedSkippedTaskIds = new Set<string>()
 
 // ── 任务 CRUD ────────────────────────────────
 
@@ -371,9 +373,12 @@ function checkTasks(): void {
 
       const [h, m] = (schedule.time ?? '09:00').split(':').map(Number)
       if (now.getHours() > h || (now.getHours() === h && now.getMinutes() >= m)) {
-        // 启动时已错过的任务不补跑，留给用户手动执行
+        // 启动时已错过的任务不补跑，留给用户手动执行（同一启动周期内只提示一次）
         if (wasScheduleBeforeStartup(schedule)) {
-          console.log(`[TaskScheduler] 跳过已错过的每日任务: ${task.name} (计划 ${schedule.time}，启动时已过时)`)
+          if (!loggedSkippedTaskIds.has(task.id)) {
+            console.log(`[TaskScheduler] 跳过已错过的每日任务: ${task.name} (计划 ${schedule.time}，启动时已过时)`)
+            loggedSkippedTaskIds.add(task.id)
+          }
           continue
         }
         console.log(`[TaskScheduler] 每日调度触发: ${task.name} (计划 ${schedule.time})`)
@@ -386,9 +391,12 @@ function checkTasks(): void {
 
       const [h, m] = (schedule.time ?? '09:00').split(':').map(Number)
       if (now.getHours() > h || (now.getHours() === h && now.getMinutes() >= m)) {
-        // 启动时已错过的任务不补跑
+        // 启动时已错过的任务不补跑（同一启动周期内只提示一次）
         if (wasScheduleBeforeStartup(schedule)) {
-          console.log(`[TaskScheduler] 跳过已错过的每周任务: ${task.name} (计划 ${WEEK_NAMES[schedule.weekDay ?? 1]} ${schedule.time}，启动时已过时)`)
+          if (!loggedSkippedTaskIds.has(task.id)) {
+            console.log(`[TaskScheduler] 跳过已错过的每周任务: ${task.name} (计划 ${WEEK_NAMES[schedule.weekDay ?? 1]} ${schedule.time}，启动时已过时)`)
+            loggedSkippedTaskIds.add(task.id)
+          }
           continue
         }
         console.log(`[TaskScheduler] 每周调度触发: ${task.name} (计划 ${WEEK_NAMES[schedule.weekDay ?? 1]} ${schedule.time})`)
@@ -401,6 +409,8 @@ function checkTasks(): void {
 /** 启动调度引擎 */
 export function startTaskScheduler(): void {
   schedulerStartTime = new Date()
+  // 清空上次启动期的"已跳过"标记，本次重新判断
+  loggedSkippedTaskIds.clear()
   console.log(`[TaskScheduler] 调度引擎已启动，启动时间: ${schedulerStartTime.toLocaleTimeString()}`)
   // 每 30 秒检查一次
   schedulerInterval = setInterval(checkTasks, 30 * 1000)

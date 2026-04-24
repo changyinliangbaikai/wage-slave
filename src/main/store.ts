@@ -51,6 +51,8 @@ const DEFAULT_CONFIG: AppConfig = {
   cat_hidden: false,
   summary_export_docx: false,
   summary_export_dir: '',
+  ai_chat_hotkey: 'CommandOrControl+Shift+A',
+  ai_chat_system_prompt: '',
 }
 
 // ── 配置 ──────────────────────────────────────

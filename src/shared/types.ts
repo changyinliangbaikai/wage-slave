@@ -36,6 +36,133 @@ export interface AppConfig {
   cat_hidden: boolean           // 是否收起到边缘
   summary_export_docx: boolean  // 是否导出工作总结为 Word 文档
   summary_export_dir: string    // 导出目录路径
+  ai_chat_hotkey: string        // 唤出 AI 对话窗口的全局快捷键（Electron Accelerator 格式）
+  ai_chat_system_prompt: string // AI 对话的系统提示词（可选，作为「通用」角色的底稿）
+  /** AI 对话窗口上次的边界（记忆尺寸/位置） */
+  ai_chat_window_bounds?: { x: number; y: number; width: number; height: number }
+}
+
+/** AI 对话附件（txt / md / docx / doc 读取后的文本 + 元数据） */
+export interface AIChatAttachment {
+  id: string
+  fileName: string
+  fileType: 'txt' | 'md' | 'docx' | 'doc'
+  sizeBytes: number      // 原始文件字节数
+  content: string        // 提取出来的文本（可能被截断）
+  charCount: number      // 原始字符数（截断前）
+  truncated: boolean     // 是否因超长被截断
+}
+
+/** AI 对话预置角色模板（邮件助手 / 翻译助手 等） */
+export interface AIChatPersona {
+  id: string
+  name: string
+  icon: string
+  /** 系统提示词；为空字符串则继承全局 ai_chat_system_prompt */
+  systemPrompt: string
+  /** 可选：覆盖 temperature；未设置时使用服务默认 */
+  temperature?: number
+}
+
+// ─────────────────────────────────────────────
+// AI 快速对话模块类型
+// ─────────────────────────────────────────────
+
+/** 聊天消息角色 */
+export type AIChatRole = 'system' | 'user' | 'assistant'
+
+/** 聊天消息（持久化 / IPC 使用） */
+export interface AIChatMessage {
+  /** 消息 id，渲染层用 */
+  id: string
+  role: AIChatRole
+  /** 正式回复内容（不含 think 块） */
+  content: string
+  /** 推理内容（<think>...</think> 或 reasoning_content） */
+  reasoning?: string
+  /** 本条消息的 token 统计（仅 assistant 消息有） */
+  stats?: AIChatStats
+  /** 附件列表（仅 user 消息有；原文内容会在发送时拼接进 prompt） */
+  attachments?: AIChatAttachment[]
+  /** 创建时间（毫秒） */
+  createdAt: number
+}
+
+/** Token 统计 */
+export interface AIChatStats {
+  /** 输入 token 数（prompt_tokens，若 API 未返回则为估算值） */
+  promptTokens: number
+  /** 输出 token 数（completion_tokens） */
+  completionTokens: number
+  /** 每秒 token 生成速度 */
+  tokensPerSecond: number
+  /** 首 token 延迟（毫秒） */
+  firstTokenLatency: number
+  /** 总耗时（毫秒） */
+  totalDurationMs: number
+  /** 是否来自 API usage 字段（true=精确，false=本地估算） */
+  fromApiUsage: boolean
+}
+
+/** 流式增量推送的载荷（main -> renderer） */
+export interface AIChatChunkPayload {
+  requestId: string
+  /** 正式回复累计内容 */
+  content: string
+  /** 推理累计内容 */
+  reasoning: string
+}
+
+/** 流式结束载荷 */
+export interface AIChatDonePayload {
+  requestId: string
+  content: string
+  reasoning: string
+  stats: AIChatStats
+}
+
+/** 流式错误载荷 */
+export interface AIChatErrorPayload {
+  requestId: string
+  error: string
+}
+
+/** 发起对话请求的参数 */
+export interface AIChatRequest {
+  requestId: string
+  /** 完整的消息历史（不含本轮 assistant） */
+  messages: Array<Pick<AIChatMessage, 'role' | 'content'>>
+}
+
+/** 会话元数据（侧边栏列表使用，不含完整消息） */
+export interface AIChatSessionMeta {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  messageCount: number
+  /** 首条用户消息的前若干字，用于列表预览 */
+  preview: string
+}
+
+/** 完整会话（元数据 + 消息列表） */
+export interface AIChatSession extends AIChatSessionMeta {
+  messages: AIChatMessage[]
+  /** 本会话使用的预置角色 id；缺失则默认 'general' */
+  personaId?: string
+}
+
+/** 搜索命中结果 */
+export interface AIChatSearchHit {
+  sessionId: string
+  title: string
+  updatedAt: number
+  /** 命中的上下文片段（首个匹配位置周围） */
+  snippet: string
+  /** 匹配次数（标题 + 所有消息累计） */
+  matchCount: number
+  /** 命中的消息 id 列表（便于跳转定位） */
+  matchedMessageIds: string[]
 }
 
 /** 像素猫动画状态 */

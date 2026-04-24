@@ -3,18 +3,31 @@
  */
 
 import log from 'electron-log/main'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, globalShortcut } from 'electron'
 
 // 初始化文件日志（接管 console.log/warn/error，同时写入文件）
 log.initialize()
 log.transports.file.level = 'debug'
 // 日志文件位置：%APPDATA%\xiao-niu-ma\logs\main.log（Windows）
 console.log('[Main] 小小牛马启动，日志路径：', log.transports.file.getFile().path)
-import { createMainWindow, getMainWindow } from './windows'
+
+// ── 主进程全局异常兜底 ───────────────────────────────────
+// 任何未捕获的异常或 rejection 都落到日志文件，不至于让 app 白退
+process.on('uncaughtException', err => {
+  log.error('[uncaughtException]', err?.message, err?.stack)
+})
+process.on('unhandledRejection', reason => {
+  const err = reason as { message?: string; stack?: string } | undefined
+  log.error('[unhandledRejection]', err?.message ?? String(reason), err?.stack)
+})
+import { createMainWindow, getMainWindow, openAIChatWindow } from './windows'
 import { createTray } from './tray'
 import { startScheduler } from './scheduler'
 import { startActivityMonitor } from './activity-monitor'
 import { registerIPCHandlers } from './ipc-handlers'
+import { initAutoUpdater } from './auto-updater'
+import { registerBackupIPC } from './backup'
+import { getConfig } from './store'
 import { IPC } from '@shared/ipc-channels'
 
 // 防止多实例
@@ -35,6 +48,8 @@ app.on('second-instance', () => {
 app.whenReady().then(() => {
   // 注册 IPC 处理器
   registerIPCHandlers()
+  // 注册备份/恢复 IPC
+  registerBackupIPC()
 
   // 创建主窗口（像素猫）
   createMainWindow()
@@ -66,6 +81,42 @@ app.whenReady().then(() => {
   }).catch(err => {
     console.error('[Main] 定时任务调度器启动失败:', err)
   })
+
+  // 注册 AI 对话的全局快捷键
+  registerAIChatHotkey()
+
+  // 自动更新（生产环境会在 10s 后检查 GitHub Releases）
+  initAutoUpdater()
+})
+
+/**
+ * 注册（或重注册）AI 对话窗口的全局唤出快捷键
+ * 失败不影响其它入口（托盘菜单 / 双击小猫）
+ */
+function registerAIChatHotkey(): void {
+  const { ai_chat_hotkey } = getConfig()
+  globalShortcut.unregisterAll()
+  if (!ai_chat_hotkey) return
+  try {
+    const ok = globalShortcut.register(ai_chat_hotkey, () => {
+      console.log('[Main] 全局快捷键触发，唤出 AI 对话窗口')
+      openAIChatWindow()
+    })
+    if (!ok) {
+      console.warn('[Main] 注册 AI 对话快捷键失败:', ai_chat_hotkey)
+    } else {
+      console.log('[Main] 已注册 AI 对话快捷键:', ai_chat_hotkey)
+    }
+  } catch (e) {
+    console.warn('[Main] 注册 AI 对话快捷键异常:', e)
+  }
+}
+
+// 导出以便 IPC 处理器在配置变更后重新注册
+export { registerAIChatHotkey }
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll()
 })
 
 // macOS：点击 Dock 图标时重新显示窗口（本项目主要面向 Windows，预留）

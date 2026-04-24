@@ -53,6 +53,24 @@ export const IPC = {
   SCHEDULER_CLEAR_LOGS:   'renderer:scheduler-clear-logs',    // 清除任务执行日志
   SCHEDULER_SELECT_DIR:   'renderer:scheduler-select-dir',    // 选择工作目录
 
+  // AI 快速对话
+  AI_CHAT_START:       'renderer:ai-chat-start',       // 发起一次流式对话请求
+  AI_CHAT_STOP:        'renderer:ai-chat-stop',        // 中止当前流式对话
+  AI_CHAT_CHUNK:       'main:ai-chat-chunk',           // 流式增量推送
+  AI_CHAT_DONE:        'main:ai-chat-done',            // 流式结束（含统计）
+  AI_CHAT_ERROR:       'main:ai-chat-error',           // 流式出错
+  AI_CHAT_FOCUS_INPUT: 'main:ai-chat-focus-input',     // 窗口被重新唤起时聚焦输入框
+
+  // AI 对话会话管理（历史 + 搜索）
+  AI_CHAT_LIST_SESSIONS:  'renderer:ai-chat-list-sessions',   // 列出全部会话元数据
+  AI_CHAT_GET_SESSION:    'renderer:ai-chat-get-session',     // 读取一条会话完整内容
+  AI_CHAT_SAVE_SESSION:   'renderer:ai-chat-save-session',    // 保存/更新一条会话
+  AI_CHAT_DELETE_SESSION: 'renderer:ai-chat-delete-session',  // 删除一条会话
+  AI_CHAT_SEARCH:         'renderer:ai-chat-search',          // 全文搜索会话
+  AI_CHAT_RENAME_SESSION: 'renderer:ai-chat-rename-session',  // 重命名会话
+  AI_CHAT_PICK_ATTACHMENTS: 'renderer:ai-chat-pick-attachments', // 选择附件（多选）：打开对话框 + 读取
+  AI_CHAT_READ_ATTACHMENTS: 'renderer:ai-chat-read-attachments', // 按路径读取附件（用于拖拽）
+
   // 窗口行为
   WINDOW_DRAG:         'renderer:window-drag',     // 拖动窗口（发送鼠标偏移）
   WINDOW_HIDE_EDGE:    'renderer:window-hide-edge',
@@ -65,6 +83,19 @@ export const IPC = {
   OPEN_SETTINGS:       'renderer:open-settings',
   OPEN_LOGS:           'renderer:open-logs',
   OPEN_TOOLS:          'renderer:open-tools',
+  OPEN_AI_CHAT:        'renderer:open-ai-chat',    // 打开 AI 快速对话窗口
+
+  // 自动更新（基于 electron-updater）
+  UPDATE_CHECK:        'renderer:update-check',    // 手动检查更新
+  UPDATE_DOWNLOAD:     'renderer:update-download', // 确认下载新版本
+  UPDATE_INSTALL:      'renderer:update-install',  // 下载完成后退出并安装
+  UPDATE_STATUS:       'main:update-status',       // 广播更新状态（checking/available/downloading/downloaded/error）
+
+  // 备份 / 恢复
+  BACKUP_EXPORT:       'renderer:backup-export',     // 导出全量数据到 zip
+  BACKUP_IMPORT:       'renderer:backup-import',     // 从 zip 恢复数据
+  BACKUP_OPEN_DATA_DIR:'renderer:backup-open-dir',   // 打开 userData 目录（手动排查/备份）
+  REPORT_SAVE:         'renderer:report-save',        // 把 AI 答复保存为本地 markdown 文档
 } as const
 
 export type IPCChannel = typeof IPC[keyof typeof IPC]

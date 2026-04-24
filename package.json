@@ -7,10 +7,15 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "dist": "npm run build && electron-builder --publish=never",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,json,md}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css,json,md}\""
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",
+    "@eslint/js": "^9.39.4",
     "@types/node": "^20.11.0",
     "@types/react": "^18.2.55",
     "@types/react-dom": "^18.2.19",
@@ -18,18 +23,36 @@
     "electron": "^29.0.0",
     "electron-builder": "^24.9.1",
     "electron-vite": "^2.0.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.5.0",
+    "prettier": "^3.8.3",
     "typescript": "^5.3.3",
+    "typescript-eslint": "^8.59.0",
     "vite": "^5.1.0"
   },
   "dependencies": {
     "docx": "^9.0.0",
     "electron-log": "^5.2.0",
+    "electron-updater": "^6.8.3",
     "electron-vite": "^2.3.0",
+    "highlight.js": "^11.11.1",
+    "html2canvas": "^1.4.1",
     "iconv-lite": "^0.7.2",
+    "jszip": "^3.10.1",
+    "katex": "^0.16.45",
     "keytar": "^7.9.0",
     "mammoth": "^1.12.0",
+    "mermaid": "^11.14.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
     "uiohook-napi": "^1.5.2"
   },
   "build": {
@@ -38,6 +61,13 @@
     "directories": {
       "output": "release"
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "changyinliangbaikai",
+        "repo": "wage-slave"
+      }
+    ],
     "mac": {
       "target": "dmg",
       "icon": "assets/icon.icns"

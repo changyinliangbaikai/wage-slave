@@ -11,12 +11,22 @@ import {
   getTodos, saveTodos,
   getLogsInRange, todayStr,
 } from './store'
-import { openSettingsWindow, showMainWindow, openLogWindow, openToolWindow } from './windows'
+import { openSettingsWindow, showMainWindow, openLogWindow, openToolWindow, openAIChatWindow, getAIChatWindow } from './windows'
 import { snoozeBreak, resetContinuousTime } from './activity-monitor'
 import { parsePlan, generateSummary } from './llm-service'
+import { startChat as startAIChat, abortChat as abortAIChat } from './ai-chat-service'
+import {
+  listSessions as listChatSessions,
+  getSession as getChatSession,
+  saveSession as saveChatSession,
+  deleteSession as deleteChatSession,
+  renameSession as renameChatSession,
+  searchSessions as searchChatSessions,
+} from './ai-chat-store'
+import { registerAIChatAttachmentHandlers } from './ai-chat-attachments'
 import { exportSummaryDocx } from './docx-export'
 import { getMainWindow } from './windows'
-import type { AppConfig, DailyLog, TodoItem } from '@shared/types'
+import type { AppConfig, DailyLog, TodoItem, AIChatRequest, AIChatSession } from '@shared/types'
 
 // ── 尝试加载 keytar（安全存储 API Key）──────────
 let keytar: typeof import('keytar') | null = null
@@ -34,7 +44,7 @@ export function registerIPCHandlers(): void {
   // ── 配置 ──────────────────────────────────────
   ipcMain.handle(IPC.CONFIG_GET, () => getConfig())
 
-  ipcMain.handle(IPC.CONFIG_SET, (_e, config: Partial<AppConfig>) => {
+  ipcMain.handle(IPC.CONFIG_SET, async (_e, config: Partial<AppConfig>) => {
     const updated = setConfig(config)
     if ('auto_launch' in config) {
       try {
@@ -44,6 +54,15 @@ export function registerIPCHandlers(): void {
         }
       } catch {
         console.warn('[IPC] 设置开机自启失败（开发模式下正常）')
+      }
+    }
+    // 动态变更 AI 对话快捷键时重新注册
+    if ('ai_chat_hotkey' in config) {
+      try {
+        const { registerAIChatHotkey } = await import('./index')
+        registerAIChatHotkey()
+      } catch (e) {
+        console.warn('[IPC] 重注册 AI 对话快捷键失败:', e)
       }
     }
     return updated
@@ -118,6 +137,48 @@ export function registerIPCHandlers(): void {
   ipcMain.on(IPC.OPEN_LOGS, () => openLogWindow())
 
   ipcMain.on(IPC.OPEN_TOOLS, () => openToolWindow())
+
+  ipcMain.on(IPC.OPEN_AI_CHAT, () => openAIChatWindow())
+
+  // ── AI 快速对话（流式）────────────────────────
+  ipcMain.handle(IPC.AI_CHAT_START, async (_e, req: AIChatRequest) => {
+    const apiKey = keytar
+      ? (await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT) ?? '')
+      : ''
+    const win = getAIChatWindow()
+    // 注意：不要 await 整个流式过程，直接 fire-and-forget 让调用方通过事件监听
+    startAIChat(req, apiKey, {
+      onChunk: (payload) => win?.webContents.send(IPC.AI_CHAT_CHUNK, payload),
+      onDone:  (payload) => win?.webContents.send(IPC.AI_CHAT_DONE, payload),
+      onError: (payload) => win?.webContents.send(IPC.AI_CHAT_ERROR, payload),
+    }).catch(err => {
+      console.error('[IPC] AI chat 未捕获异常:', err)
+    })
+    return { ok: true, requestId: req.requestId }
+  })
+
+  ipcMain.on(IPC.AI_CHAT_STOP, (_e, requestId: string) => {
+    const aborted = abortAIChat(requestId)
+    console.log(`[IPC] AI chat stop requestId=${requestId}, aborted=${aborted}`)
+  })
+
+  // ── AI 对话会话管理 ──────────────────────────
+  ipcMain.handle(IPC.AI_CHAT_LIST_SESSIONS, () => listChatSessions())
+
+  ipcMain.handle(IPC.AI_CHAT_GET_SESSION, (_e, id: string) => getChatSession(id))
+
+  ipcMain.handle(IPC.AI_CHAT_SAVE_SESSION, (_e, session: AIChatSession) => saveChatSession(session))
+
+  ipcMain.handle(IPC.AI_CHAT_DELETE_SESSION, (_e, id: string) => ({ ok: deleteChatSession(id) }))
+
+  ipcMain.handle(IPC.AI_CHAT_RENAME_SESSION, (_e, { id, title }: { id: string; title: string }) =>
+    ({ ok: renameChatSession(id, title) })
+  )
+
+  ipcMain.handle(IPC.AI_CHAT_SEARCH, (_e, query: string) => searchChatSessions(query))
+
+  // ── AI 对话附件处理（选择 + 读取） ───────────
+  registerAIChatAttachmentHandlers()
 
   // ── 休息提醒交互 ──────────────────────────────
   ipcMain.on(IPC.SNOOZE_BREAK, (_e, minutes: number) => snoozeBreak(minutes))

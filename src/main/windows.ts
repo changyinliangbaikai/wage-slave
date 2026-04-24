@@ -16,6 +16,7 @@ let mainWindow: BrowserWindow | null = null
 let settingsWindow: BrowserWindow | null = null
 let logWindow: BrowserWindow | null = null
 let toolWindow: BrowserWindow | null = null
+let aiChatWindow: BrowserWindow | null = null
 
 const isDev = !app.isPackaged
 
@@ -238,4 +239,70 @@ export function openToolWindow(): void {
   toolWindow.on('closed', () => {
     toolWindow = null
   })
+}
+
+// ── AI 快速对话窗口 ────────────────────────────
+/**
+ * 打开（或复用）AI 对话窗口。
+ * 若窗口已存在则聚焦并通知其聚焦输入框。
+ * 尺寸与位置会记忆到 config.ai_chat_window_bounds。
+ */
+export function openAIChatWindow(): void {
+  if (aiChatWindow && !aiChatWindow.isDestroyed()) {
+    if (aiChatWindow.isMinimized()) aiChatWindow.restore()
+    aiChatWindow.show()
+    aiChatWindow.focus()
+    aiChatWindow.webContents.send('main:ai-chat-focus-input')
+    return
+  }
+
+  // 读取上次记忆的 bounds（尺寸 + 位置），无记录则用默认值
+  const saved = getConfig().ai_chat_window_bounds
+  const winOpts: Electron.BrowserWindowConstructorOptions = {
+    width: saved?.width ?? 760,
+    height: saved?.height ?? 680,
+    minWidth: 520,
+    minHeight: 480,
+    title: '小小牛马 · AI 对话',
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  }
+  if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
+    winOpts.x = saved.x
+    winOpts.y = saved.y
+  }
+  aiChatWindow = new BrowserWindow(winOpts)
+
+  aiChatWindow.loadURL(getRendererURL('/ai-chat'))
+
+  // 保存尺寸/位置：debounce 处理，避免拖动过程频繁写盘
+  let saveTimer: NodeJS.Timeout | null = null
+  const saveBounds = () => {
+    if (!aiChatWindow || aiChatWindow.isDestroyed()) return
+    const b = aiChatWindow.getBounds()
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      setConfig({ ai_chat_window_bounds: b })
+    }, 300)
+  }
+  aiChatWindow.on('resize', saveBounds)
+  aiChatWindow.on('move', saveBounds)
+
+  aiChatWindow.on('closed', () => {
+    aiChatWindow = null
+    if (saveTimer) clearTimeout(saveTimer)
+  })
+
+  if (isDev) {
+    // 开发期自动打开 devtools 便于调试流式输出
+    // aiChatWindow.webContents.openDevTools({ mode: 'detach' })
+  }
+}
+
+export function getAIChatWindow(): BrowserWindow | null {
+  return aiChatWindow
 }

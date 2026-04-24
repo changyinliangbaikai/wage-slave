@@ -1,0 +1,66 @@
+/* StatusBubble：轻量、陪伴性的小气泡。不像 SpeechBubble 是正式流程。 */
+
+.status-bubble {
+  position: relative;
+  background: rgba(255, 254, 240, 0.96);
+  border: 2px solid #3a1a04;
+  padding: 6px 10px 7px;
+  max-width: 240px;
+  min-width: 80px;
+  /* 像素风内阴影，轻量版 */
+  box-shadow:
+    inset -2px -2px 0 #d4b87a,
+    inset 1px 1px 0 #fffde0,
+    3px 3px 0 rgba(0, 0, 0, 0.12);
+  image-rendering: pixelated;
+  font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
+  font-size: 12px;
+  color: #3a1a04;
+  line-height: 1.45;
+  text-align: center;
+  /* 气泡可点击（用于 onTap 抚摸），cursor: pointer 提示可交互 */
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(4px) scale(0.96);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+.status-bubble.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.status-bubble.hidden {
+  /* 淡出时禁止点击，避免误触 */
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px) scale(0.96);
+}
+
+.status-bubble-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 尾巴：向下的小三角，和 SpeechBubble 一致风格但更小 */
+.status-bubble-tail {
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 8px solid #3a1a04;
+}
+.status-bubble-tail::after {
+  content: '';
+  position: absolute;
+  top: -11px;
+  left: -4px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid rgba(255, 254, 240, 0.96);
+}

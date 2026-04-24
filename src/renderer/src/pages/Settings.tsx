@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useLayoutEffect } from 'react'
 import type { AppConfig } from '@shared/types'
+import { IPC } from '@shared/ipc-channels'
 import './Settings.css'
 
 // 在设置窗口中，electronAPI 可能挂在 window 上
@@ -165,6 +166,29 @@ export default function Settings() {
       </section>
 
       <section className="settings-section">
+        <h2>AI 对话</h2>
+        <div className="field-row">
+          <label>唤出快捷键</label>
+          <input
+            type="text"
+            value={config.ai_chat_hotkey}
+            onChange={e => update({ ai_chat_hotkey: e.target.value })}
+            placeholder="CommandOrControl+Shift+A"
+          />
+        </div>
+        <div className="field-row" style={{ alignItems: 'flex-start' }}>
+          <label>系统提示词（可选）</label>
+          <textarea
+            value={config.ai_chat_system_prompt}
+            onChange={e => update({ ai_chat_system_prompt: e.target.value })}
+            placeholder="你是一个乐于助人的 AI 助手…"
+            rows={3}
+            style={{ flex: 1, maxWidth: 240, resize: 'vertical', fontFamily: 'inherit', fontSize: 12, padding: 6 }}
+          />
+        </div>
+      </section>
+
+      <section className="settings-section">
         <h2>导出设置</h2>
         <div className="field-row">
           <label>导出工作总结为 Word</label>
@@ -197,6 +221,43 @@ export default function Settings() {
             </div>
           </div>
         )}
+      </section>
+
+      <section className="settings-section">
+        <h2>数据备份</h2>
+        <div className="field-row" style={{ alignItems: 'flex-start' }}>
+          <label style={{ paddingTop: 4 }}>导出/恢复</label>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 240 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button
+                className="btn-test"
+                onClick={async () => {
+                  const r = await api.invoke(IPC.BACKUP_EXPORT) as { ok: boolean; filePath?: string; reason?: string }
+                  if (r.ok) setTestResult(`✓ 已导出到：${r.filePath}`)
+                  else if (r.reason !== 'cancelled') setTestResult(`✗ 导出失败：${r.reason}`)
+                }}
+              >⬇ 导出全部数据</button>
+              <button
+                className="btn-test"
+                onClick={async () => {
+                  const r = await api.invoke(IPC.BACKUP_IMPORT) as { ok: boolean; reason?: string; snapshotDir?: string }
+                  if (r.ok) setTestResult(`✓ 恢复成功，原数据已备份到：${r.snapshotDir}（请重启应用生效）`)
+                  else if (r.reason !== 'cancelled' && r.reason !== 'cancelled-by-user') setTestResult(`✗ 恢复失败：${r.reason}`)
+                }}
+              >⬆ 从备份恢复</button>
+              <button
+                className="btn-test"
+                onClick={async () => {
+                  await api.invoke(IPC.BACKUP_OPEN_DATA_DIR)
+                }}
+              >📂 打开数据目录</button>
+            </div>
+            <small style={{ fontSize: 11, color: '#8a7e5e', lineHeight: 1.5 }}>
+              备份包含：日志、待办、AI 对话、定时任务、应用配置。<br />
+              不包含：API Key（保存在系统钥匙串）、应用日志文件。
+            </small>
+          </div>
+        </div>
       </section>
 
       <section className="settings-section">

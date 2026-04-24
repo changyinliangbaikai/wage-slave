@@ -2,10 +2,12 @@
  * App 根组件
  */
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import PixelCat from './components/PixelCat'
 import ContextMenu, { MenuItem } from './components/ContextMenu'
 import SpeechBubble from './components/SpeechBubble'
+import StatusBubble from './components/StatusBubble'
+import type { BubbleContext } from './components/StatusBubble/messages'
 import MorningFlow from './pages/MorningFlow'
 import BreakReminder from './pages/BreakReminder'
 import EveningFlow from './pages/EveningFlow'
@@ -20,11 +22,13 @@ import {
   openSettings,
   openLogs,
   openTools,
+  openAIChat,
   notifyBreakDone,
   startWindowDrag,
   moveWindowDrag,
   endWindowDrag,
 } from './hooks/useIPC'
+import { useCatMood } from './hooks/useCatMood'
 import { CatAnimator } from './components/PixelCat/animator'
 import type { CatState, TodoItem } from '@shared/types'
 import './App.css'
@@ -65,6 +69,103 @@ export default function App() {
   const dragRef = useRef({ isDragging: false, startScreenX: 0, startScreenY: 0, didMove: false })
   const isIgnoringRef = useRef(true)
 
+  // 心情/饲食度系统
+  const catMood = useCatMood()
+  // 窗口启动时间戳（供文案上下文里的"刚启动"类判断使用，lazy init 避免在渲染期调用 Date.now）
+  const [mountAt] = useState<number>(() => Date.now())
+  // StatusBubble 抢跑计数器：每次 pet/feed 递增，触发气泡立即弹一条"感谢"文案
+  const [bubbleTrigger, setBubbleTrigger] = useState(0)
+  const bumpBubble = useCallback(() => setBubbleTrigger(v => v + 1), [])
+
+  // ── 今日待办：用于 StatusBubble 感知数量 ──
+  const [todayTodos, setTodayTodos] = useState<TodoItem[]>([])
+  useEffect(() => {
+    // 加载今日待办，供文案上下文使用（只做只读访问，不影响 todos/eveningTodos）
+    let cancelled = false
+    const load = async () => {
+      try {
+        const t = await getTodos(localDateStr())
+        if (!cancelled) setTodayTodos(t)
+      } catch {
+        /* ignore */
+      }
+    }
+    load()
+    // 每 2 分钟刷新一次今日待办（用户可能在 todos flow 里标记完成 → 反映到 StatusBubble）
+    const timer = setInterval(load, 120_000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [])
+  // 当 todos flow 里保存时也同步一下
+  useEffect(() => {
+    if (todosDate === localDateStr() && todos.length > 0) {
+      // 这里是"派生 state 同步"的合理场景：todos 是某天的数据，只有当它恰好是今天时才同步
+      // React 19 的 pure-effect 规则不鼓励 effect 里 setState，但派生一份"只读投影"本质就是 effect
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTodayTodos(todos)
+    }
+  }, [todos, todosDate])
+
+  // ── 心情 tier 变化 → 播一次情绪动画（仅在 idle 流程时，不打扰正在进行的流程） ──
+  // 用 ref 记录上一次 tier；仅当 tier 真的变化才触发一次动画，避免反复播
+  const prevTierRef = useRef(catMood.tier)
+  useEffect(() => {
+    const prev = prevTierRef.current
+    prevTierRef.current = catMood.tier
+    if (prev === catMood.tier) return
+    if (activeFlowRef.current !== 'none') return
+    const animator = animatorRef.current
+    if (!animator) return
+    // hungry / sad：播 worried 一下
+    if (catMood.tier === 'hungry' || catMood.tier === 'sad') {
+      animator.setState('worried', true)
+      console.log('[CatMood] tier → worried，播 worried 动画')
+      const t = setTimeout(() => animator.setState('idle'), 3000)
+      return () => clearTimeout(t)
+    }
+    // great：播一次伸懒腰（stretch 是非循环，播完自动回 idle）
+    if (catMood.tier === 'great') {
+      animator.setState('stretch', true)
+      console.log('[CatMood] tier → great，播 stretch 动画')
+    }
+  }, [catMood.tier])
+
+  // ── StatusBubble 文案上下文（每分钟刷新一次，降低 re-render） ──
+  const [bubbleNowTick, setBubbleNowTick] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setBubbleNowTick(x => x + 1), 60_000)
+    return () => clearInterval(t)
+  }, [])
+  const bubbleContext: BubbleContext = useMemo(() => {
+    // bubbleNowTick 是每分钟触发的"时间摆钟"，让 useMemo 对时间敏感；hour/sinceMountMs 据此刷新
+    // Date.now 在这里故意被调用，依赖 bubbleNowTick 保证每分钟刷新一次；React purity 规则的担忧在此不适用
+    // eslint-disable-next-line react-hooks/purity
+    const now = Date.now()
+    const d = new Date(now)
+    const pending = todayTodos.filter(t => t.status !== 'done').length
+    return {
+      hour: d.getHours(),
+      dayOfWeek: d.getDay(),
+      todoTotal: todayTodos.length,
+      todoPending: pending,
+      mood: catMood.state.mood,
+      hunger: catMood.state.hunger,
+      tier: catMood.tier,
+      sinceMountMs: now - mountAt,
+      sinceFedMs: catMood.state.lastFedAt > 0 ? now - catMood.state.lastFedAt : Infinity,
+      sinceInteractMs: catMood.state.lastInteractAt > 0 ? now - catMood.state.lastInteractAt : Infinity,
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    todayTodos,
+    catMood.state.mood,
+    catMood.state.hunger,
+    catMood.state.lastFedAt,
+    catMood.state.lastInteractAt,
+    catMood.tier,
+    bubbleNowTick,
+    mountAt,
+  ])
+
   // 用 ref 跟踪当前 flow，供 useCallback 内部读取最新值（避免闭包陈旧问题）
   const activeFlowRef = useRef<ActiveFlow>('none')
   // 自动触发器被阻断时，暂存一个待执行的回调
@@ -82,7 +183,7 @@ export default function App() {
     const handleMouseMove = (e: MouseEvent) => {
       if (dragRef.current.isDragging) return
       const el = document.elementFromPoint(e.clientX, e.clientY)
-      const isOverContent = !!el?.closest('.cat-layer, .bubble-wrapper, .bubble, .context-menu')
+      const isOverContent = !!el?.closest('.cat-layer, .bubble-wrapper, .bubble, .context-menu, .status-bubble')
       if (isOverContent && isIgnoringRef.current) {
         isIgnoringRef.current = false
         api.sendRaw('window:set-ignore-mouse-events', false)
@@ -113,10 +214,12 @@ export default function App() {
 
   const onMorningDone = useCallback((newTodos: TodoItem[]) => {
     setTodos(newTodos)
+    setTodayTodos(newTodos)         // 计划录入完立即刷新 StatusBubble 上下文
+    catMood.planMade()               // 心情 +5
     setFlow('none')
     setForceCatState(undefined)
     drainPending()
-  }, [setFlow, drainPending])
+  }, [setFlow, drainPending, catMood])
 
   // ── 自动触发：晨间 ────────────────────────────
   useOnMorningTrigger(useCallback(({ date }) => {
@@ -201,10 +304,18 @@ export default function App() {
 
   // ── 待办气泡：点击切换状态 ────────────────────
   const toggleTodoInView = useCallback((id: string) => {
-    setTodos(prev => prev.map(t =>
-      t.id === id ? { ...t, status: t.status === 'done' ? 'pending' : 'done' } : t
-    ))
-  }, [])
+    setTodos(prev => {
+      const target = prev.find(t => t.id === id)
+      // 当从 pending → done 时，奖励心情 +1（用户完成了一件事）
+      if (target && target.status !== 'done') {
+        catMood.taskDone()
+        console.log('[CatMood] 勾选完成待办 →', target.title)
+      }
+      return prev.map(t =>
+        t.id === id ? { ...t, status: t.status === 'done' ? 'pending' : 'done' } : t
+      )
+    })
+  }, [catMood])
 
   // 关闭待办气泡时自动保存变更
   const closeTodosFlow = useCallback(async () => {
@@ -236,11 +347,18 @@ export default function App() {
     }
 
     const handleMouseUp = () => {
+      const wasDrag = dragRef.current.didMove
       dragRef.current.isDragging = false
-      endWindowDrag()
-      isIgnoringRef.current = true
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
+      // 只有真正拖动过才走 drag-end：保存位置 + 主进程主动恢复鼠标穿透。
+      // 纯点击场景不调用，避免主进程立刻 setIgnoreMouseEvents(true) 导致
+      // 紧随其后的 dblclick 第二次 mousedown 被挡掉（双击失效）。
+      // 穿透态的恢复由 mousemove 处理器在光标离开内容时自动完成。
+      if (wasDrag) {
+        endWindowDrag()
+        isIgnoringRef.current = true
+      }
     }
 
     document.addEventListener('mousemove', handleMouseMove)
@@ -258,6 +376,15 @@ export default function App() {
     if (dragRef.current.didMove) return
     animatorRef.current?.setState('happy', true)
     setTimeout(() => animatorRef.current?.setState('idle'), 2000)
+    // 抚摸：心情 +3，并触发一次"呼噜噜"感谢气泡
+    catMood.pet()
+    bumpBubble()
+  }, [catMood, bumpBubble])
+
+  // 双击小猫 → 打开 AI 对话窗口（双击事件会先触发一次 click，忽略其 idle 回弹即可）
+  const handleCatDoubleClick = useCallback(() => {
+    if (dragRef.current.didMove) return
+    openAIChat()
   }, [])
 
   // ── 右键菜单手动触发（直接切换，清空排队） ────
@@ -300,13 +427,32 @@ export default function App() {
     openTools()
   }, [])
 
+  // 喂食：播 happy 动画 + catMood.feed() + 即时弹"好吃"气泡
+  const triggerFeed = useCallback(() => {
+    animatorRef.current?.setState('happy', true)
+    setTimeout(() => animatorRef.current?.setState('idle'), 2500)
+    catMood.feed()
+    bumpBubble()
+  }, [catMood, bumpBubble])
+
+  // 喂食菜单项的动态标签：根据饥饿度给个视觉反馈
+  const feedLabel = useMemo(() => {
+    const h = catMood.state.hunger
+    if (h < 25) return '喂食（好饿）'
+    if (h < 60) return '喂食'
+    return '喂食（吃饱啦）'
+  }, [catMood.state.hunger])
+
   const ctxMenuItems: MenuItem[] = [
     { label: '录入今日计划', icon: '☀', onClick: triggerMorningPlan },
     { label: '查看今日待办', icon: '📋', onClick: showTodos },
     { label: '录入工作日志', icon: '📝', onClick: triggerManualLog },
     { label: '生成工作总结', icon: '📊', onClick: triggerSummary },
     { divider: true },
+    { label: 'AI 对话', icon: '💬', onClick: () => openAIChat() },
     { label: '小工具', icon: '🛠️', onClick: triggerTools },
+    { divider: true },
+    { label: feedLabel, icon: '🐟', onClick: triggerFeed },
     { divider: true },
     { label: '查看工作日志', icon: '📒', onClick: () => openLogs() },
     { label: '设置', icon: '⚙', onClick: () => openSettings() },
@@ -333,7 +479,30 @@ export default function App() {
           <BreakReminder elapsedMin={elapsedMin} onDone={closeFlow} />
         )}
         {(activeFlow === 'evening' || activeFlow === 'manual-log') && (
-          <EveningFlow date={currentDate} todos={eveningTodos} onDone={closeFlow} />
+          <EveningFlow
+            date={currentDate}
+            todos={eveningTodos}
+            onDone={closeFlow}
+            onReviewSubmitted={({ doneCount, totalCount }) => {
+              // 完成率决定奖励：≥80% → celebrate(+10)；≥50% → taskDone 多播几次；否则只 planMade(+5) 鼓励
+              if (totalCount === 0) {
+                // 只写了日志、无待办统计：也给一点鼓励
+                catMood.planMade()
+              } else {
+                const ratio = doneCount / totalCount
+                if (ratio >= 0.8) {
+                  catMood.celebrate()
+                  console.log('[CatMood] 晚间复盘 ≥80% → celebrate')
+                } else if (ratio >= 0.5) {
+                  catMood.planMade() // +5 中等鼓励
+                  console.log('[CatMood] 晚间复盘 ≥50% → planMade(+5)')
+                } else {
+                  // 低完成率也给 +3 鼓励（已经坚持复盘本身就值得肯定）
+                  catMood.pet()
+                }
+              }
+            }}
+          />
         )}
         {activeFlow === 'summary' && (
           <SummaryFlow onDone={closeFlow} />
@@ -367,7 +536,21 @@ export default function App() {
           </SpeechBubble>
         )}
         {activeFlow === 'none' && (
-          <div className="idle-hint">右键查看菜单</div>
+          <>
+            {/* 陪伴性状态气泡：根据时间/待办/心情随机显示一句话，不阻塞交互 */}
+            <StatusBubble
+              context={bubbleContext}
+              triggerKey={bubbleTrigger}
+              onTap={() => {
+                // 点击气泡 = 轻拍，等价于抚摸
+                animatorRef.current?.setState('happy', true)
+                setTimeout(() => animatorRef.current?.setState('idle'), 1500)
+                catMood.pet()
+                bumpBubble()
+              }}
+            />
+            <div className="idle-hint">右键查看菜单 · 双击打开 AI 对话</div>
+          </>
         )}
       </div>
 
@@ -375,6 +558,7 @@ export default function App() {
       <div
         className="cat-layer"
         onClick={handleCatClick}
+        onDoubleClick={handleCatDoubleClick}
         onContextMenu={handleContextMenu}
         onMouseDown={handleMouseDown}
       >

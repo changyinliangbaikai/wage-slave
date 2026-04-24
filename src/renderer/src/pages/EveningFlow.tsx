@@ -12,11 +12,13 @@ interface Props {
   date: string
   todos: TodoItem[]          // 当天待办，可能为空（如早上跳过了）
   onDone: () => void
+  /** 复盘实际提交成功后触发（区别于 onDone：onDone 在"跳过"/关闭时也会触发） */
+  onReviewSubmitted?: (stats: { doneCount: number; totalCount: number }) => void
 }
 
 type Step = 'greeting' | 'review-todos' | 'supplement' | 'manual-log' | 'done'
 
-export default function EveningFlow({ date, todos, onDone }: Props) {
+export default function EveningFlow({ date, todos, onDone, onReviewSubmitted }: Props) {
   const [step, setStep] = useState<Step>('greeting')
   const [updatedTodos, setUpdatedTodos] = useState<TodoItem[]>(todos)
   const [logText, setLogText] = useState('')
@@ -58,8 +60,9 @@ export default function EveningFlow({ date, todos, onDone }: Props) {
     })
     setSaving(false)
     setStep('done')
+    onReviewSubmitted?.({ doneCount, totalCount: updatedTodos.length })
     setTimeout(onDone, 1500)
-  }, [date, updatedTodos, logText, onDone])
+  }, [date, updatedTodos, logText, onDone, onReviewSubmitted])
 
   // 跳过补充，直接保存
   const handleSkipSupplement = useCallback(async () => {
@@ -73,8 +76,9 @@ export default function EveningFlow({ date, todos, onDone }: Props) {
     })
     setSaving(false)
     setStep('done')
+    onReviewSubmitted?.({ doneCount, totalCount: updatedTodos.length })
     setTimeout(onDone, 1500)
-  }, [date, updatedTodos, onDone])
+  }, [date, updatedTodos, onDone, onReviewSubmitted])
 
   // 无待办时的手动日志
   const handleSubmitManualLog = useCallback(async () => {
@@ -83,8 +87,10 @@ export default function EveningFlow({ date, todos, onDone }: Props) {
     await saveLog({ date, eod_log: logText, morning_skipped: true })
     setSaving(false)
     setStep('done')
+    // 无待办时只算"写了日志"，用 0/0 表示没有待办统计
+    onReviewSubmitted?.({ doneCount: 0, totalCount: 0 })
     setTimeout(onDone, 1500)
-  }, [date, logText, onDone])
+  }, [date, logText, onDone, onReviewSubmitted])
 
   if (step === 'greeting') {
     return (
