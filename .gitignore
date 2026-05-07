@@ -4,3 +4,5 @@ dist-electron/
 release/
 *.log
 .env
+.DS_Store
+*.tsbuildinfo
