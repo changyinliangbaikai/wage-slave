@@ -195,8 +195,59 @@
   background: #6b5345;
 }
 
+/* 检查进度提示（流式） */
+.check-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #fff8e6;
+  border: 2px dashed #c4a87a;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #5a4a3a;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.check-progress strong {
+  color: #8b5a2a;
+}
+
+.dot-loader {
+  display: inline-block;
+  letter-spacing: 2px;
+  color: #c4a87a;
+  animation: dot-loader-fade 1.2s infinite ease-in-out;
+}
+
+@keyframes dot-loader-fade {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* 通用文字链接按钮（用于"查看运行日志"等次要操作） */
+.btn-link {
+  background: transparent;
+  border: none;
+  color: #6b8eff;
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+  padding: 2px 4px;
+  margin-left: auto;
+}
+
+.btn-link:hover {
+  color: #3b5edf;
+}
+
 /* 错误信息 */
 .error-message {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 10px;
   background: #fff0f0;
   border: 2px solid #e88;
@@ -204,6 +255,13 @@
   color: #c44;
   font-size: 13px;
   margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.error-message > div {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
 }
 
 /* 检查结果 */

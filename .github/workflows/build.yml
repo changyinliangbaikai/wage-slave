@@ -123,10 +123,119 @@ jobs:
           retention-days: 30
         continue-on-error: true
 
+  # ── macOS 构建 ────────────────────────────────────────
+  # 当前仅构建 Apple Silicon (arm64) 版本
+  # 如需同时支持 Intel Mac (x64)，可改用 matrix 策略：
+  #   strategy:
+  #     matrix:
+  #       include:
+  #         - { arch: x64,   runner: macos-13 }   # Intel Mac runner
+  #         - { arch: arm64, runner: macos-14 }   # Apple Silicon runner
+  #   runs-on: ${{ matrix.runner }}
+  build-mac:
+    name: Build macOS Installer
+    runs-on: macos-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      # 配置 Python 3.11（node-gyp 编译 native 模块需要）
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 安装依赖（包括 native 模块的 macOS 编译）
+      - name: 安装依赖
+        shell: bash
+        run: |
+          npm install
+
+      # 重新编译 uiohook-napi native binding（针对当前 Electron 版本 + arm64 架构）
+      - name: 重编译 uiohook-napi
+        shell: bash
+        run: |
+          echo "正在重新编译 uiohook-napi (arm64)..."
+          npx @electron/rebuild -f -w uiohook-napi --arch=arm64 --verbose
+          echo "uiohook-napi 编译完成"
+
+      # 构建（编译 TypeScript + Vite 打包前端）
+      - name: 构建项目
+        shell: bash
+        run: |
+          echo "开始构建项目..."
+          npm run build
+          echo "项目构建完成"
+
+      # 打包为 macOS dmg 安装包
+      # 通过环境变量禁用代码签名自动发现（个人项目无 Apple Developer 证书）
+      - name: 打包 macOS 安装包
+        shell: bash
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          echo "开始打包 macOS 安装包..."
+          echo "当前工作目录："
+          pwd
+          echo "项目结构："
+          ls -la
+          echo "dist-electron 目录："
+          ls -la dist-electron/ || echo "dist-electron 目录不存在"
+          echo "dist 目录："
+          ls -la dist/ || echo "dist 目录不存在"
+          # 不使用 npm run dist，避免 electron-builder 默认行为；显式指定 mac + arm64
+          npx electron-builder --mac --arm64 --publish=never
+          echo "macOS 安装包打包完成"
+          echo "release 目录内容："
+          ls -la release/ || echo "release 目录不存在"
+
+      # 如果构建失败，收集调试信息
+      - name: 收集调试信息
+        if: failure()
+        shell: bash
+        run: |
+          echo "构建失败，收集调试信息..."
+          echo "Node.js 版本："
+          node --version
+          echo "npm 版本："
+          npm --version
+          echo "Python 版本："
+          python --version
+          echo "macOS 版本："
+          sw_vers || true
+          echo "当前工作目录："
+          pwd
+          echo "项目文件："
+          ls -la
+          echo "Electron 构建日志："
+          find . -name "*.log" -exec echo "=== {} ===" \; -exec cat {} \;
+
+      # 上传安装包为 Artifact
+      - name: 上传安装包 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiao-niu-ma-mac-${{ github.sha }}
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/**/*.dmg
+            release/**/*.zip
+          retention-days: 30
+        continue-on-error: true
+
   # ── 发布 Release（仅 tag 推送时执行）──────────────────
   release:
     name: Create GitHub Release
-    needs: build-windows
+    needs: [build-windows, build-mac]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -139,7 +248,7 @@ jobs:
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
-          pattern: xiao-niu-ma-windows-*
+          pattern: xiao-niu-ma-*
           merge-multiple: true
           path: ./release-files
 
@@ -148,7 +257,10 @@ jobs:
         run: |
           echo "下载的构建产物："
           ls -la ./release-files/
-          find ./release-files/ -type f -name "*.exe" -o -name "*.msi"
+          echo "--- Windows 产物 ---"
+          find ./release-files/ -type f \( -name "*.exe" -o -name "*.msi" \) || echo "未找到 Windows 产物"
+          echo "--- macOS 产物 ---"
+          find ./release-files/ -type f \( -name "*.dmg" -o -name "*.zip" \) || echo "未找到 macOS 产物"
 
       - name: 读取版本号
         id: version
@@ -185,18 +297,28 @@ jobs:
           body: |
             ## 小小牛马 v${{ steps.version.outputs.VERSION }}
 
-            ### 安装说明
+            ### Windows 安装说明
             1. 下载 `小小牛马-Setup-${{ steps.version.outputs.VERSION }}.exe`
             2. 双击安装（如弹出 Windows 安全提示，点击"更多信息"→"仍要运行"）
             3. 安装完成后在系统托盘找到橘猫图标
             4. 右键托盘图标 → 设置，填写 LLM API 信息
 
+            ### macOS 安装说明（仅支持 Apple Silicon / M 系列芯片）
+            1. 下载 `xiao-niu-ma-${{ steps.version.outputs.VERSION }}-arm64.dmg`
+            2. 双击打开 dmg，将「小小牛马」拖入「应用程序」
+            3. 首次运行如提示「无法验证开发者」或「已损坏」：
+               - 方式 A：右键应用 → 打开 → 在弹窗中点「打开」
+               - 方式 B：终端执行 `xattr -cr /Applications/小小牛马.app` 后再启动
+            4. 「休息提醒」需要在「系统设置 → 隐私与安全性 → 辅助功能」中允许小小牛马
+
             ### 数据存储位置
-            `%APPDATA%\xiao-niu-ma\`
+            - Windows：`%APPDATA%\xiao-niu-ma\`
+            - macOS：`~/Library/Application Support/xiao-niu-ma/`
 
             ### 注意事项
             - 首次运行需在设置中配置 LLM API Key
-            - 如休息提醒不生效，请在 Windows 安全中心将应用加入白名单
+            - Windows：如休息提醒不生效，请在 Windows 安全中心将应用加入白名单
+            - macOS：当前仅提供 Apple Silicon (arm64) 版本，Intel Mac 用户请从源码自行构建
 
             ---
             ### 更新内容

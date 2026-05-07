@@ -7,10 +7,26 @@ import { BrowserWindow, screen, app, ipcMain } from 'electron'
 import path from 'path'
 import { getConfig, setConfig } from './store'
 
-const EDGE_THRESHOLD = 20   // 距屏幕边缘多少像素触发收起
+const EDGE_THRESHOLD = 20   // 距屏幕边缘多少像素触发隐藏
 const CAT_W = 320           // 猫咪窗口宽度
 const CAT_H = 500           // 猫咪窗口高度（含气泡展开余量）
-const HIDDEN_PEEK = 8       // 收起后露出的像素数（猫耳）
+
+/**
+ * 小猫在窗口内的可见区域参数。
+ * 必须与渲染层保持同步：
+ *   - 渲染层 src/renderer/src/components/PixelCat/index.tsx 的
+ *     `FRAME_W * DISPLAY_SCALE` / `FRAME_H * DISPLAY_SCALE` = 120 * 0.75 / 144 * 0.75
+ *   - 渲染层 src/renderer/src/App.css 的 `.app-container` 通过
+ *     flex 列布局把猫水平居中、垂直贴近窗口底部（padding-bottom: 8）
+ *
+ * 边缘判定使用"小猫可见区域"而非"窗口边"，否则窗口大量透明留白会
+ * 导致还没拖到屏幕边就触发隐藏。
+ */
+const CAT_VISIBLE_W = 90              // 120 * 0.75
+const CAT_VISIBLE_H = 108             // 144 * 0.75
+const CAT_BOTTOM_PADDING = 8          // 与 App.css 的 padding-bottom 一致
+const CAT_OFFSET_X = (CAT_W - CAT_VISIBLE_W) / 2          // 窗口左 → 猫左
+const CAT_OFFSET_Y = CAT_H - CAT_BOTTOM_PADDING - CAT_VISIBLE_H  // 窗口顶 → 猫顶
 
 let mainWindow: BrowserWindow | null = null
 let settingsWindow: BrowserWindow | null = null
@@ -96,12 +112,13 @@ export function createMainWindow(): BrowserWindow {
     }
   })
 
-  // 拖动结束后保存位置
+  // 仅保存位置；不在此触发隐藏判定，避免拖动过程中（drag-move 内的
+  // setPosition 也会触发 'moved'）窗口在用户还按着鼠标时突然消失。
+  // 隐藏判定只在 drag-end（手松开）时进行。
   mainWindow.on('moved', () => {
     if (!mainWindow) return
     const [wx, wy] = mainWindow.getPosition()
     setConfig({ cat_position: { x: wx, y: wy } })
-    checkEdgeHide(wx, wy)
   })
 
   if (isDev) {
@@ -111,28 +128,39 @@ export function createMainWindow(): BrowserWindow {
   return mainWindow
 }
 
-/** 检查是否拖到屏幕边缘，触发收起 */
+/**
+ * 检查是否拖到屏幕边缘。若是 → "最小化式"隐藏整个窗口（含气泡）。
+ *
+ * 注意：直接 mainWindow.hide() 而不是把窗口推出屏幕外，是因为：
+ *   - 推出屏幕只能藏住小猫本体，气泡（bubble-layer）位于小猫上方，气泡冒出
+ *     时其内容仍会出现在屏幕里（半截浮在屏幕底/顶）。
+ *   - hide() 把整个窗口隐藏，气泡也不会再泄露。
+ *
+ * 恢复入口：托盘左键点击 / 托盘菜单"🐱 显示小猫"
+ *   → showMainWindow() 会在 cat_hidden=true 时复位到屏幕右下角并 show()。
+ */
 function checkEdgeHide(wx: number, wy: number): void {
   if (!mainWindow) return
   const display = screen.getDisplayNearestPoint({ x: wx, y: wy })
-  const { x: dx, y: dy, width: dw, height: dh } = display.workArea
+  // 使用 bounds（物理屏幕边界）而不是 workArea：
+  // macOS 上 alwaysOnTop 窗口会覆盖 dock，若用 workArea 会把 dock 上方误判为
+  // "屏幕底"，用户感觉还没拖到底就触发隐藏。
+  const { x: dx, y: dy, width: dw, height: dh } = display.bounds
 
-  const nearLeft   = wx - dx < EDGE_THRESHOLD
-  const nearRight  = (dx + dw) - (wx + CAT_W) < EDGE_THRESHOLD
-  const nearTop    = wy - dy < EDGE_THRESHOLD
-  const nearBottom = (dy + dh) - (wy + CAT_H) < EDGE_THRESHOLD
+  // 小猫可见区域在屏幕上的坐标（窗口大量透明，必须用猫的边而非窗口边判定）
+  const catLeft   = wx + CAT_OFFSET_X
+  const catRight  = catLeft + CAT_VISIBLE_W
+  const catTop    = wy + CAT_OFFSET_Y
+  const catBottom = catTop + CAT_VISIBLE_H
 
-  if (nearLeft) {
-    mainWindow.setPosition(dx - CAT_W + HIDDEN_PEEK, wy)
-    setConfig({ cat_hidden: true })
-  } else if (nearRight) {
-    mainWindow.setPosition(dx + dw - HIDDEN_PEEK, wy)
-    setConfig({ cat_hidden: true })
-  } else if (nearTop) {
-    mainWindow.setPosition(wx, dy - CAT_H + HIDDEN_PEEK)
-    setConfig({ cat_hidden: true })
-  } else if (nearBottom) {
-    mainWindow.setPosition(wx, dy + dh - HIDDEN_PEEK)
+  const nearLeft   = catLeft - dx < EDGE_THRESHOLD
+  const nearRight  = (dx + dw) - catRight < EDGE_THRESHOLD
+  const nearTop    = catTop - dy < EDGE_THRESHOLD
+  const nearBottom = (dy + dh) - catBottom < EDGE_THRESHOLD
+
+  if (nearLeft || nearRight || nearTop || nearBottom) {
+    console.log('[Window] 拖到屏幕边缘，最小化式隐藏小猫；从托盘恢复')
+    mainWindow.hide()
     setConfig({ cat_hidden: true })
   } else {
     setConfig({ cat_hidden: false })

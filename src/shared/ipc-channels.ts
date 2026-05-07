@@ -42,6 +42,9 @@ export const IPC = {
   TOOLS_OPEN_FILE_DIALOG: 'renderer:tools-open-file-dialog', // 打开文件选择对话框
   TOOLS_READ_FILE:        'renderer:tools-read-file',        // 读取本地文件内容
   TOOLS_SPELL_CHECK:      'renderer:tools-spell-check',      // 错别字检查
+  TOOLS_SPELL_CHECK_CHUNK: 'main:tools-spell-check-chunk',    // 流式增量推送
+  TOOLS_SPELL_CHECK_CANCEL: 'renderer:tools-spell-check-cancel', // 中止当前检查
+  OPEN_LOG_FILE:          'renderer:open-log-file',          // 打开应用运行日志文件夹
 
   // 定时任务
   SCHEDULER_LIST_TASKS:   'renderer:scheduler-list-tasks',   // 获取任务列表

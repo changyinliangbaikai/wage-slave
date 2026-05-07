@@ -2,7 +2,7 @@
  * 错别字检查工具面板
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { IPC } from '@shared/ipc-channels'
 import type { SpellCheckError } from '@shared/types'
 import './SpellCheckPanel.css'
@@ -85,6 +85,29 @@ export default function SpellCheckPanel({ onBack }: Props) {
   const [status, setStatus] = useState<CheckStatus>('idle')
   const [errors, setErrors] = useState<SpellCheckError[]>([])
   const [errorMsg, setErrorMsg] = useState('')
+  // 流式进度信息：分别累计"思考过程"和"正文"字符数 + 总耗时
+  const [reasoningChars, setReasoningChars] = useState(0)
+  const [contentChars, setContentChars] = useState(0)
+  const [elapsedSec, setElapsedSec] = useState(0)
+  const startedAtRef = useRef<number>(0)
+  const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // 订阅主进程推送的流式增量（reasoning_content 和 content 分通道展示）
+  useEffect(() => {
+    const off = window.electronAPI.on(IPC.TOOLS_SPELL_CHECK_CHUNK, (...args: unknown[]) => {
+      const payload = (args[0] ?? {}) as { content?: string; reasoning?: string }
+      setReasoningChars((payload.reasoning ?? '').length)
+      setContentChars((payload.content ?? '').length)
+    })
+    return off
+  }, [])
+
+  // 卸载时清理计时器
+  useEffect(() => {
+    return () => {
+      if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+    }
+  }, [])
 
   // 打开文件选择对话框
   const handleOpenFile = useCallback(async () => {
@@ -123,18 +146,28 @@ export default function SpellCheckPanel({ onBack }: Props) {
     }
   }, [])
 
-  // 开始检查
+  // 开始检查（流式）
   const handleCheck = useCallback(async () => {
     if (!text.trim()) return
 
     setStatus('checking')
     setErrors([])
     setErrorMsg('')
+    setReasoningChars(0)
+    setContentChars(0)
+    setElapsedSec(0)
+    startedAtRef.current = Date.now()
+
+    // 启动 1s 心跳计时器，让用户看到检查仍在进行
+    if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current)
+    elapsedTimerRef.current = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - startedAtRef.current) / 1000))
+    }, 1000)
 
     try {
       const result = await window.electronAPI.invoke(IPC.TOOLS_SPELL_CHECK, {
         text,
-        stream: false,
+        stream: true,
       }) as {
         errors: SpellCheckError[]
         error?: string
@@ -142,7 +175,7 @@ export default function SpellCheckPanel({ onBack }: Props) {
 
       if (result.error) {
         setErrorMsg(result.error)
-        setStatus('error')
+        setStatus(result.error === '已取消' ? 'idle' : 'error')
         return
       }
 
@@ -151,10 +184,49 @@ export default function SpellCheckPanel({ onBack }: Props) {
       setErrors(calibrated)
       setStatus('done')
     } catch (e) {
-      setErrorMsg('检查失败，请重试')
+      const msg = e instanceof Error ? e.message : String(e)
+      setErrorMsg(`检查失败：${msg}`)
       setStatus('error')
+    } finally {
+      if (elapsedTimerRef.current) {
+        clearInterval(elapsedTimerRef.current)
+        elapsedTimerRef.current = null
+      }
     }
   }, [text])
+
+  // 取消正在进行的检查
+  const handleCancel = useCallback(async () => {
+    try {
+      await window.electronAPI.invoke(IPC.TOOLS_SPELL_CHECK_CANCEL)
+    } catch { /* 忽略 */ }
+  }, [])
+
+  // 打开应用运行日志文件夹
+  // 失败时把原因写进 errorMsg，避免"点了没反应"无从排查
+  const handleOpenLog = useCallback(async () => {
+    console.log('[SpellCheckPanel] 点击查看运行日志')
+    try {
+      const result = await window.electronAPI.invoke(IPC.OPEN_LOG_FILE) as {
+        ok: boolean
+        path?: string
+        error?: string
+        hint?: string
+      }
+      console.log('[SpellCheckPanel] OPEN_LOG_FILE 结果:', result)
+      if (!result?.ok) {
+        const msg = result?.error || '打开日志失败（主进程可能未注册该 handler，请重启应用后重试）'
+        setErrorMsg(msg)
+        setStatus('error')
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error('[SpellCheckPanel] 调用 OPEN_LOG_FILE 异常:', msg)
+      // 多半是 No handler registered，主进程未重启
+      setErrorMsg(`打开日志失败：${msg}（请重启应用后重试）`)
+      setStatus('error')
+    }
+  }, [])
 
   // 重置
   const handleReset = useCallback(() => {
@@ -163,6 +235,9 @@ export default function SpellCheckPanel({ onBack }: Props) {
     setErrors([])
     setErrorMsg('')
     setStatus('idle')
+    setReasoningChars(0)
+    setContentChars(0)
+    setElapsedSec(0)
   }, [])
 
   return (
@@ -237,6 +312,11 @@ export default function SpellCheckPanel({ onBack }: Props) {
         >
           {status === 'checking' ? '检查中...' : '开始检查'}
         </button>
+        {status === 'checking' && (
+          <button className="btn-reset" onClick={handleCancel}>
+            取消
+          </button>
+        )}
         {(status === 'done' || status === 'error') && (
           <button className="btn-reset" onClick={handleReset}>
             重新开始
@@ -244,10 +324,42 @@ export default function SpellCheckPanel({ onBack }: Props) {
         )}
       </div>
 
+      {/* 检查进度（流式） */}
+      {/* 阶段判定：先 thinking（仅 reasoning 在累计） → 再 streaming（content 开始累计） */}
+      {status === 'checking' && (() => {
+        const phase = contentChars > 0
+          ? 'streaming'
+          : reasoningChars > 0
+            ? 'thinking'
+            : 'connecting'
+        return (
+          <div className="check-progress">
+            <span className="dot-loader" aria-hidden="true">●●●</span>
+            <span>
+              {phase === 'connecting' && <>正在连接模型… 已耗时 <strong>{elapsedSec}s</strong></>}
+              {phase === 'thinking' && (
+                <>🧠 模型思考中… 已耗时 <strong>{elapsedSec}s</strong> · 已生成思考 <strong>{reasoningChars}</strong> 字符</>
+              )}
+              {phase === 'streaming' && (
+                <>正在接收结果… 已耗时 <strong>{elapsedSec}s</strong> · 已接收 <strong>{contentChars}</strong> 字符
+                  {reasoningChars > 0 && <> · 思考 {reasoningChars} 字</>}
+                </>
+              )}
+            </span>
+            <button className="btn-link" onClick={handleOpenLog} title="打开应用日志文件夹（main.log）">
+              查看运行日志
+            </button>
+          </div>
+        )
+      })()}
+
       {/* 错误信息 */}
       {status === 'error' && errorMsg && (
         <div className="error-message">
-          ❌ {errorMsg}
+          <div>❌ {errorMsg}</div>
+          <button className="btn-link" onClick={handleOpenLog} title="打开应用日志文件夹（main.log）">
+            查看运行日志
+          </button>
         </div>
       )}
 
