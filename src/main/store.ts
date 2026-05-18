@@ -53,6 +53,7 @@ const DEFAULT_CONFIG: AppConfig = {
   summary_export_dir: '',
   ai_chat_hotkey: 'CommandOrControl+Shift+A',
   ai_chat_system_prompt: '',
+  active_pet_pack: 'default-cat',
 }
 
 // ── 配置 ──────────────────────────────────────

@@ -27,8 +27,16 @@ import { startActivityMonitor } from './activity-monitor'
 import { registerIPCHandlers } from './ipc-handlers'
 import { initAutoUpdater } from './auto-updater'
 import { registerBackupIPC } from './backup'
+import {
+  registerPetSchemePrivileged,
+  initPetPackStore,
+  registerPetPackIPC,
+} from './pet-pack-store'
 import { getConfig } from './store'
 import { IPC } from '@shared/ipc-channels'
+
+// 注册 pet:// 自定义协议为特权 scheme（必须在 app.ready 之前调用）
+registerPetSchemePrivileged()
 
 // 防止多实例
 const gotLock = app.requestSingleInstanceLock()
@@ -46,6 +54,10 @@ app.on('second-instance', () => {
 })
 
 app.whenReady().then(() => {
+  // 桌宠包系统：必须在创建主窗口之前完成 pet:// 协议绑定
+  initPetPackStore()
+  registerPetPackIPC()
+
   // 注册 IPC 处理器
   registerIPCHandlers()
   // 注册备份/恢复 IPC

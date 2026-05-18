@@ -14,7 +14,7 @@ export function createTray(): Tray {
   const isDev = !app.isPackaged
   const iconPath = isDev
     ? path.join(__dirname, '../../assets/tray-icon.png')
-    : path.join(process.resourcesPath, 'pixel_cat', 'tray-icon.png')
+    : path.join(process.resourcesPath, 'pets', 'tray-icon.png')
   const icon = nativeImage.createFromPath(iconPath)
 
   tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon)

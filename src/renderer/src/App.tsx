@@ -115,18 +115,13 @@ export default function App() {
     if (activeFlowRef.current !== 'none') return
     const animator = animatorRef.current
     if (!animator) return
-    // hungry / sad：播 worried 一下
-    if (catMood.tier === 'hungry' || catMood.tier === 'sad') {
-      animator.setState('worried', true)
-      console.log('[CatMood] tier → worried，播 worried 动画')
-      const t = setTimeout(() => animator.setState('idle'), 3000)
-      return () => clearTimeout(t)
-    }
-    // great：播一次伸懒腰（stretch 是非循环，播完自动回 idle）
+    // great：播一次庆祝（celebrate 是非循环，播完自动回 idle）
     if (catMood.tier === 'great') {
-      animator.setState('stretch', true)
-      console.log('[CatMood] tier → great，播 stretch 动画')
+      animator.setState('celebrate', true)
+      console.log('[CatMood] tier → great，播 celebrate 动画')
     }
+    // hungry/sad：精简模型不再单独播负面动画，由 StatusBubble 文案承担表达
+  // 注：旧版 worried 动画在 4 态模型中已合并入 idle
   }, [catMood.tier])
 
   // ── StatusBubble 文案上下文（每分钟刷新一次，降低 re-render） ──
@@ -226,7 +221,8 @@ export default function App() {
     const activate = () => {
       setCurrentDate(date)
       setFlow('morning')
-      setForceCatState('happy')
+      // 流程激活：用 petting 让小猫表达「陪着你」的轻量在线感（循环，关闭流程后回 idle）
+      setForceCatState('petting')
     }
     if (PROTECTED_FLOWS.has(activeFlowRef.current)) {
       // 用户正在输入，排队等待
@@ -245,7 +241,8 @@ export default function App() {
     }
     setElapsedMin(elapsed_min)
     setFlow('break')
-    setForceCatState('worried')
+    // 休息提醒：不强制状态，保持 idle 默认表现；负面情绪由文案承担
+    setForceCatState(undefined)
   }, [setFlow]))
 
   // ── 自动触发：晚间 ────────────────────────────
@@ -259,7 +256,7 @@ export default function App() {
         setEveningTodos([])
       }
       setFlow('evening')
-      setForceCatState('happy')
+      setForceCatState('petting')
     }
     if (PROTECTED_FLOWS.has(activeFlowRef.current)) {
       pendingTrigger.current = activate
@@ -283,13 +280,14 @@ export default function App() {
     const today = localDateStr()
     setCurrentDate(today)
     setFlow('morning')
-    setForceCatState('happy')
+    setForceCatState('petting')
   }, [setFlow]))
 
   useOnEvent('main:trigger-summary', useCallback(() => {
     pendingTrigger.current = null
     setFlow('summary')
-    setForceCatState('talk')
+    // 总结流程会调 LLM 流式生成，小猫处于「工作中」状态
+    setForceCatState('busy')
   }, [setFlow]))
 
   useOnEvent('main:trigger-manual-log', useCallback(async () => {
@@ -299,7 +297,7 @@ export default function App() {
     const t = await getTodos(today)
     setEveningTodos(t)
     setFlow('manual-log')
-    setForceCatState('talk')
+    setForceCatState('busy')
   }, [setFlow]))
 
   // ── 待办气泡：点击切换状态 ────────────────────
@@ -374,7 +372,8 @@ export default function App() {
 
   const handleCatClick = useCallback(() => {
     if (dragRef.current.didMove) return
-    animatorRef.current?.setState('happy', true)
+    // 点击：播 petting 一段轻量反馈，2 秒后回 idle
+    animatorRef.current?.setState('petting', true)
     setTimeout(() => animatorRef.current?.setState('idle'), 2000)
     // 抚摸：心情 +3，并触发一次"呼噜噜"感谢气泡
     catMood.pet()
@@ -395,7 +394,8 @@ export default function App() {
     setTodos(t)
     setTodosDate(today)
     setFlow('todos')
-    setForceCatState('talk')
+    // 查看待办列表：保持 idle 默认即可，不强制状态
+    setForceCatState(undefined)
   }, [setFlow])
 
   const triggerManualLog = useCallback(async () => {
@@ -405,7 +405,7 @@ export default function App() {
     const t = await getTodos(today)
     setEveningTodos(t)
     setFlow('manual-log')
-    setForceCatState('talk')
+    setForceCatState('busy')
   }, [setFlow])
 
   const triggerMorningPlan = useCallback(() => {
@@ -413,13 +413,13 @@ export default function App() {
     const today = localDateStr()
     setCurrentDate(today)
     setFlow('morning')
-    setForceCatState('happy')
+    setForceCatState('petting')
   }, [setFlow])
 
   const triggerSummary = useCallback(() => {
     pendingTrigger.current = null
     setFlow('summary')
-    setForceCatState('talk')
+    setForceCatState('busy')
   }, [setFlow])
 
   const triggerTools = useCallback(() => {
@@ -427,9 +427,9 @@ export default function App() {
     openTools()
   }, [])
 
-  // 喂食：播 happy 动画 + catMood.feed() + 即时弹"好吃"气泡
+  // 喂食：播 petting 一段反馈 + catMood.feed() + 即时弹"好吃"气泡
   const triggerFeed = useCallback(() => {
-    animatorRef.current?.setState('happy', true)
+    animatorRef.current?.setState('petting', true)
     setTimeout(() => animatorRef.current?.setState('idle'), 2500)
     catMood.feed()
     bumpBubble()
@@ -492,6 +492,8 @@ export default function App() {
                 const ratio = doneCount / totalCount
                 if (ratio >= 0.8) {
                   catMood.celebrate()
+                  // 高完成率：手动播一次庆祝动画（一次性，播完回 idle）
+                  animatorRef.current?.setState('celebrate', true)
                   console.log('[CatMood] 晚间复盘 ≥80% → celebrate')
                 } else if (ratio >= 0.5) {
                   catMood.planMade() // +5 中等鼓励
@@ -543,7 +545,7 @@ export default function App() {
               triggerKey={bubbleTrigger}
               onTap={() => {
                 // 点击气泡 = 轻拍，等价于抚摸
-                animatorRef.current?.setState('happy', true)
+                animatorRef.current?.setState('petting', true)
                 setTimeout(() => animatorRef.current?.setState('idle'), 1500)
                 catMood.pet()
                 bumpBubble()

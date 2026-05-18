@@ -1,0 +1,53 @@
+{
+  "schema": "xiaoniu-pet/v1",
+  "id": "default-cat",
+  "name": "默认像素猫",
+  "version": "1.0.0",
+  "author": "小小牛马",
+  "description": "随小小牛马一起发布的默认像素猫桌宠",
+  "thumbnail": "thumbnail.png",
+  "frame": {
+    "width": 120,
+    "height": 144,
+    "displayScale": 0.75
+  },
+  "fallback": "idle",
+  "animations": {
+    "idle": {
+      "type": "sprite",
+      "source": "sprite_all.png",
+      "startFrame": 0,
+      "frameCount": 4,
+      "fps": 2,
+      "loop": true,
+      "layout": "horizontal"
+    },
+    "petting": {
+      "type": "sprite",
+      "source": "sprite_all.png",
+      "startFrame": 4,
+      "frameCount": 2,
+      "fps": 5,
+      "loop": true,
+      "layout": "horizontal"
+    },
+    "celebrate": {
+      "type": "sprite",
+      "source": "sprite_all.png",
+      "startFrame": 6,
+      "frameCount": 2,
+      "fps": 5,
+      "loop": false,
+      "layout": "horizontal"
+    },
+    "busy": {
+      "type": "sprite",
+      "source": "sprite_all.png",
+      "startFrame": 8,
+      "frameCount": 4,
+      "fps": 6,
+      "loop": true,
+      "layout": "horizontal"
+    }
+  }
+}

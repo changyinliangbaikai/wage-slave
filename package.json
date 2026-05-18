@@ -99,12 +99,12 @@
     ],
     "extraResources": [
       {
-        "from": "assets/pixel_cat",
-        "to": "pixel_cat"
+        "from": "assets/pets",
+        "to": "pets"
       },
       {
         "from": "assets/tray-icon.png",
-        "to": "pixel_cat/tray-icon.png"
+        "to": "pets/tray-icon.png"
       }
     ]
   }

@@ -40,6 +40,8 @@ export interface AppConfig {
   ai_chat_system_prompt: string // AI 对话的系统提示词（可选，作为「通用」角色的底稿）
   /** AI 对话窗口上次的边界（记忆尺寸/位置） */
   ai_chat_window_bounds?: { x: number; y: number; width: number; height: number }
+  /** 当前激活的桌宠包 id，默认 'default-cat' */
+  active_pet_pack: string
 }
 
 /** AI 对话附件（txt / md / docx / doc 读取后的文本 + 元数据） */
@@ -165,15 +167,109 @@ export interface AIChatSearchHit {
   matchedMessageIds: string[]
 }
 
-/** 像素猫动画状态 */
-export type CatState =
-  | 'idle'
-  | 'blink'
-  | 'talk'
-  | 'happy'
-  | 'worried'
-  | 'stretch'
-  | 'sleep'
+/**
+ * 桌宠动画核心状态（4 态精简模型）
+ *
+ * 用途映射：
+ *   - idle:      默认循环（空闲）
+ *   - petting:   点击/抚摸/喂食/勾选待办等轻量交互（循环，约 2 秒后回 idle）
+ *   - celebrate: 计划录入完成/晚间高完成率/庆祝（一次性，播完自动回 idle）
+ *   - busy:      LLM 调用/流式生成/正在录入流程（循环）
+ *
+ * 桌宠包加载时仅 `idle` 必填；其余缺失时引擎自动回退到 `fallback`（默认 idle）。
+ */
+export type CatState = 'idle' | 'petting' | 'celebrate' | 'busy'
+
+/** 桌宠包核心状态常量数组（供运行时校验/遍历） */
+export const PET_CORE_STATES: readonly CatState[] = ['idle', 'petting', 'celebrate', 'busy'] as const
+
+// ─────────────────────────────────────────────
+// 桌宠包（Pet Pack）规范类型
+// ─────────────────────────────────────────────
+
+/** 单个动画切片：从 sprite sheet 切出一段连续帧 */
+export interface PetSpriteAnimation {
+  type: 'sprite'
+  /** 相对包根目录的 sprite 图片路径 */
+  source: string
+  /** 起始帧索引（从 0 开始） */
+  startFrame: number
+  /** 帧数 */
+  frameCount: number
+  /** 帧率 */
+  fps: number
+  /** 是否循环（false = 一次性，播完回 idle） */
+  loop: boolean
+  /** 排布方式：横向（默认）/竖向 */
+  layout?: 'horizontal' | 'vertical'
+}
+
+/** 单个动画切片：使用独立帧序列（高级模式） */
+export interface PetFramesAnimation {
+  type: 'frames'
+  /** 相对包根目录的帧图片路径数组 */
+  frames: string[]
+  fps: number
+  loop: boolean
+}
+
+export type PetAnimationSpec = PetSpriteAnimation | PetFramesAnimation
+
+/** 桌宠包 manifest（v1 schema） */
+export interface PetManifest {
+  /** 固定为 'xiaoniu-pet/v1' */
+  schema: 'xiaoniu-pet/v1'
+  /** 包唯一标识，匹配 ^[a-z0-9_-]{1,64}$ */
+  id: string
+  name: string
+  version: string
+  author?: string
+  description?: string
+  /** 缩略图相对路径 */
+  thumbnail?: string
+  /** 单帧像素尺寸与渲染缩放 */
+  frame: {
+    width: number
+    height: number
+    /** 显示缩放，默认 0.75 */
+    displayScale?: number
+  }
+  /** 缺失动画时的回退状态，默认 'idle' */
+  fallback?: CatState
+  /** 4 个核心动画：仅 idle 必填 */
+  animations: Partial<Record<CatState, PetAnimationSpec>> & { idle: PetAnimationSpec }
+  /** 行为参数（可选） */
+  behavior?: {
+    /** （保留扩展） */
+    [key: string]: unknown
+  }
+}
+
+/** 桌宠包来源：builtin = 内置；user = 用户自行安装 */
+export type PetPackScope = 'builtin' | 'user'
+
+/** 列表项元数据（不含 animations 完整结构，供 UI 列表使用） */
+export interface PetPackMeta {
+  id: string
+  name: string
+  version: string
+  author?: string
+  description?: string
+  scope: PetPackScope
+  /** 已 normalize 为 pet:// 的缩略图 URL；缺失时为 null */
+  thumbnailUrl: string | null
+  /** 是否当前激活 */
+  active: boolean
+}
+
+/** 完整激活包数据（含资源 URL，渲染进程直接使用） */
+export interface ActivePetPack {
+  meta: PetPackMeta
+  /** 把 manifest 中所有相对路径替换为 pet:// 协议 URL 后的 manifest */
+  manifest: PetManifest
+  /** sprite/frames 的根 URL，用于动态拼接（pet://<scope>/<id>/） */
+  baseUrl: string
+}
 
 /** 气泡类型 */
 export type BubbleType =

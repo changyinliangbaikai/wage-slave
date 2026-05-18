@@ -99,6 +99,18 @@ export const IPC = {
   BACKUP_IMPORT:       'renderer:backup-import',     // 从 zip 恢复数据
   BACKUP_OPEN_DATA_DIR:'renderer:backup-open-dir',   // 打开 userData 目录（手动排查/备份）
   REPORT_SAVE:         'renderer:report-save',        // 把 AI 答复保存为本地 markdown 文档
+
+  // 桌宠包（Pet Pack）管理
+  PETS_LIST:            'renderer:pets-list',           // 列出所有已安装桌宠包
+  PETS_GET_ACTIVE:      'renderer:pets-get-active',     // 获取当前激活包的完整 manifest（含 pet:// URL）
+  PETS_ACTIVATE:        'renderer:pets-activate',       // 激活某个包
+  PETS_INSTALL_SPRITE:  'pets:install-sprite',           // [兼容] 直接用本地 PNG 文件路径安装（已不在 UI 使用）
+  PETS_INSTALL_SPRITE_BYTES: 'pets:install-sprite-bytes', // [当前 UI 主路径] 渲染端裁切后把 PNG 字节传上来安装
+  PETS_INSTALL_ZIP:     'renderer:pets-install-zip',    // 导入 .zip 桌宠包（高级）
+  PETS_REMOVE:          'renderer:pets-remove',         // 删除用户包
+  PETS_OPEN_DIR:        'renderer:pets-open-dir',       // 打开用户桌宠目录
+  PETS_PICK_FILE:       'renderer:pets-pick-file',      // 打开文件对话框选 PNG（返回路径 + 尺寸）
+  PETS_CHANGED:         'main:pets-changed',            // 主进程→渲染：激活包变化
 } as const
 
 export type IPCChannel = typeof IPC[keyof typeof IPC]

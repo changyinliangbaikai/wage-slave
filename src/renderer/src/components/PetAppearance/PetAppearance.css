@@ -1,0 +1,415 @@
+/* ── 桌宠外观面板 ───────────────────────────── */
+
+.pet-section h2 {
+  font-size: 14px;
+  font-weight: bold;
+  color: #8b5e3c;
+  margin-bottom: 10px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e8d4b0;
+}
+
+/* 当前激活卡片 */
+.pet-active-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: #fffde0;
+  border: 2px solid #d4874a;
+  margin-bottom: 12px;
+  box-shadow: 2px 2px 0 #3a1a04;
+}
+
+.pet-thumb-large {
+  width: 60px;
+  height: 72px;
+  /* cover + position 0 0 → 自动裁切 sprite 左上角第 0 帧（占涵十帧横向 sprite 与单帧图） */
+  object-fit: cover;
+  object-position: 0 0;
+  image-rendering: pixelated;
+  background: #fff8e0;
+  border: 1px solid #d4b87a;
+}
+
+.pet-thumb-placeholder,
+.pet-thumb-placeholder-small {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.pet-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.pet-name {
+  font-size: 13px;
+  font-weight: bold;
+  color: #3a1a04;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-meta {
+  font-size: 11px;
+  color: #8b5e3c;
+  margin-top: 2px;
+}
+
+/* 已安装包网格 */
+.pet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pet-loading {
+  grid-column: 1 / -1;
+  text-align: center;
+  font-size: 12px;
+  color: #8b5e3c;
+  padding: 16px 0;
+}
+
+.pet-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px 8px;
+  background: #fff;
+  border: 2px solid #d4b87a;
+  cursor: pointer;
+  user-select: none;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.pet-card:hover {
+  border-color: #d4874a;
+  box-shadow: 2px 2px 0 #3a1a04;
+  transform: translate(-1px, -1px);
+}
+
+.pet-card-active {
+  background: #fffde0;
+  border-color: #d4874a;
+  box-shadow: 2px 2px 0 #3a1a04;
+  cursor: default;
+}
+
+.pet-card-active::before {
+  content: '✓';
+  position: absolute;
+  top: 2px;
+  left: 4px;
+  color: #d4874a;
+  font-weight: bold;
+  font-size: 12px;
+}
+
+.pet-card img {
+  width: 48px;
+  height: 56px;
+  /* 同 .pet-thumb-large：包容 sprite sheet 与单帧图 两种缩略图 */
+  object-fit: cover;
+  object-position: 0 0;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.pet-thumb-placeholder-small {
+  width: 48px;
+  height: 56px;
+  font-size: 22px;
+}
+
+.pet-card-name {
+  font-size: 11px;
+  color: #3a1a04;
+  max-width: 100%;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pet-card-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  font-size: 14px;
+  line-height: 1;
+  background: transparent;
+  border: none;
+  color: #8b5e3c;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pet-card-remove:hover {
+  background: #d4874a;
+  color: #fff;
+}
+
+/* 上传主入口 */
+.pet-upload-btn {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 12px;
+  margin-bottom: 12px;
+  background: #fffde0;
+  border: 2px dashed #d4874a;
+  color: #3a1a04;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.pet-upload-btn:hover {
+  background: #fff5c8;
+  border-style: solid;
+  border-color: #c0733a;
+}
+
+.pet-upload-icon {
+  font-size: 20px;
+  font-weight: bold;
+  color: #d4874a;
+}
+
+.pet-upload-label {
+  font-size: 13px;
+  font-weight: bold;
+}
+
+.pet-upload-hint {
+  font-size: 11px;
+  color: #8b5e3c;
+}
+
+/* 高级操作 */
+.pet-advanced {
+  margin-bottom: 12px;
+  background: #fffef5;
+  border: 1px solid #e8d4b0;
+  padding: 4px 8px;
+}
+
+.pet-advanced > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: #8b5e3c;
+  padding: 4px 0;
+}
+
+.pet-advanced[open] > summary {
+  border-bottom: 1px dashed #e8d4b0;
+  margin-bottom: 6px;
+}
+
+.pet-advanced-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pet-advanced-row .btn-test {
+  margin-top: 0;
+}
+
+.pet-advanced-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #8a7e5e;
+  line-height: 1.5;
+}
+
+/* AI 提示词卡片 */
+.pet-ai-card {
+  background: #fff;
+  border: 2px solid #d4b87a;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.pet-ai-card h3 {
+  font-size: 13px;
+  font-weight: bold;
+  color: #8b5e3c;
+  margin: 0 0 8px;
+}
+
+.pet-ai-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.pet-ai-row label {
+  font-size: 12px;
+  color: #5a3a1a;
+  flex-shrink: 0;
+}
+
+.pet-ai-row input {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid #d4b87a;
+  background: #fff;
+  font-size: 12px;
+  font-family: inherit;
+  color: #3a1a04;
+}
+
+.pet-prompt-preview {
+  background: #fffef5;
+  border: 1px solid #e8d4b0;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #3a1a04;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  font-family: 'Consolas', 'Microsoft YaHei', monospace;
+  margin: 0 0 8px;
+}
+
+.pet-ai-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pet-ai-actions .btn-test {
+  margin-top: 0;
+}
+
+.pet-ai-actions small {
+  font-size: 11px;
+  color: #8a7e5e;
+}
+
+/* 反馈 toast */
+.pet-feedback {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #fffde0;
+  border: 1px solid #d4b87a;
+  font-size: 12px;
+  color: #3a1a04;
+}
+
+/* 导入弹窗 */
+.pet-modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(58, 26, 4, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.pet-modal {
+  background: #fffef5;
+  border: 2px solid #3a1a04;
+  box-shadow: 4px 4px 0 #3a1a04;
+  padding: 16px;
+  width: 90%;
+  max-width: 440px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.pet-modal h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: bold;
+  color: #3a1a04;
+  border-bottom: 2px solid #d4874a;
+  padding-bottom: 6px;
+}
+
+.pet-modal-preview {
+  margin-bottom: 8px;
+  padding: 8px;
+  background: #fff8e0;
+  border: 1px solid #d4b87a;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.pet-modal-preview img {
+  max-width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  display: inline-block;
+}
+
+.pet-modal-no-preview {
+  padding: 24px 0;
+  font-size: 12px;
+  color: #8a7e5e;
+  text-align: center;
+}
+
+.pet-modal-size {
+  font-size: 12px;
+  color: #3a7a3a;
+  margin-bottom: 12px;
+}
+
+.pet-modal-size-bad {
+  color: #b04a2a;
+}
+
+.pet-modal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.pet-modal-row label {
+  font-size: 12px;
+  color: #5a3a1a;
+  width: 80px;
+  flex-shrink: 0;
+}
+
+.pet-modal-row input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #d4b87a;
+  background: #fff;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.pet-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #e8d4b0;
+}
+
+.pet-modal-actions .btn-test,
+.pet-modal-actions .btn-save {
+  margin-top: 0;
+}

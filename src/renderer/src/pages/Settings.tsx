@@ -6,6 +6,7 @@
 import { useState, useEffect, useLayoutEffect } from 'react'
 import type { AppConfig } from '@shared/types'
 import { IPC } from '@shared/ipc-channels'
+import PetAppearance from '../components/PetAppearance'
 import './Settings.css'
 
 // 在设置窗口中，electronAPI 可能挂在 window 上
@@ -259,6 +260,8 @@ export default function Settings() {
           </div>
         </div>
       </section>
+
+      <PetAppearance />
 
       <section className="settings-section">
         <h2>系统</h2>
