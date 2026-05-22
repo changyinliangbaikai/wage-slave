@@ -69,7 +69,17 @@ export default function PetRenderer({ state, onAnimatorReady, className }: Props
     }
   }, [])
 
-  // pack 就绪后启动 animator；若已有 animator，则做包热切换
+  // 把 onAnimatorReady 装到 ref 里，避免它的引用变化引起下面那个 effect 重跑、
+  // 从而把正在跑的 animator stop 掉（这是之前热切换 pack 后桌宠卡死的根因之一）。
+  const onAnimatorReadyRef = useRef(onAnimatorReady)
+  useEffect(() => {
+    onAnimatorReadyRef.current = onAnimatorReady
+  }, [onAnimatorReady])
+
+  // pack 就绪后启动 animator；若已有 animator，则做包热切换。
+  // 关键：本 effect 故意不返回 cleanup —— pack 变化只调 swapPack 让 animator 平滑过渡，
+  // 不能因为 deps 变化就 stop 当前 animator（否则下次 effect 会走 swap 分支但永远不再 start）。
+  // animator 真正的 stop 由下面的 unmount-only effect 负责。
   useEffect(() => {
     if (!pack) return
     if (animatorRef.current) {
@@ -79,9 +89,18 @@ export default function PetRenderer({ state, onAnimatorReady, className }: Props
     const animator = new PetAnimator(pack, payload => setFrame(payload))
     animatorRef.current = animator
     animator.start()
-    onAnimatorReady?.(animator)
-    return () => animator.stop()
-  }, [pack, onAnimatorReady])
+    onAnimatorReadyRef.current?.(animator)
+    console.log('[PetRenderer] animator 已创建并启动')
+  }, [pack])
+
+  // 仅在组件卸载时 stop animator，避免 deps 变化导致 animator 被误停
+  useEffect(() => {
+    return () => {
+      animatorRef.current?.stop()
+      animatorRef.current = null
+      console.log('[PetRenderer] 组件卸载，animator 已停止')
+    }
+  }, [])
 
   // 外部强制状态
   useEffect(() => {

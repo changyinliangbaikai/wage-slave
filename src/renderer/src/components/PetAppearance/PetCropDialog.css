@@ -1,4 +1,4 @@
-/* ── 桌宠裁切弹窗 ───────────────────────────── */
+/* ── 桌宠裁切弹窗（整体优化版） ─────────────── */
 
 .pet-crop-mask {
   position: fixed;
@@ -8,49 +8,159 @@
   align-items: center;
   justify-content: center;
   z-index: 100;
+  backdrop-filter: blur(2px);
 }
 
 .pet-crop-modal {
   background: #fffef5;
   border: 2px solid #3a1a04;
   box-shadow: 4px 4px 0 #3a1a04;
-  padding: 16px;
+  padding: 14px 16px 12px;
   width: 92%;
-  max-width: 680px;
-  max-height: 92vh;
+  /* 大屏拓到 960px 给预览条更多空间；小屏 92vw */
+  max-width: min(960px, 92vw);
+  max-height: 94vh;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.pet-crop-modal h3 {
-  margin: 0 0 8px;
-  font-size: 14px;
-  font-weight: bold;
-  color: #3a1a04;
+/* ── 1. 头部 ───────────────────────── */
+.pet-crop-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   border-bottom: 2px solid #d4874a;
   padding-bottom: 6px;
 }
 
-.pet-crop-hint {
-  font-size: 12px;
-  color: #8a7e5e;
-  margin-bottom: 10px;
+.pet-crop-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: bold;
+  color: #3a1a04;
 }
 
-/* 图片舞台：等比显示，包住整张原图，最高 360px */
-.pet-crop-stage-wrap {
+.pet-crop-close {
+  width: 26px;
+  height: 26px;
+  background: #fff;
+  border: 1px solid #d4b87a;
+  font-size: 18px;
+  line-height: 1;
+  color: #3a1a04;
+  cursor: pointer;
+  font-family: inherit;
+  padding: 0;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.pet-crop-close:hover {
+  background: #fff5c8;
+  border-color: #b8642d;
+}
+
+.pet-crop-close:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── 2. 工具栏 ─────────────────────── */
+.pet-crop-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.pet-crop-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pet-crop-toolbar-label {
+  font-size: 11px;
+  color: #5a3a1a;
+  margin-right: 2px;
+}
+
+.pet-crop-toolbar-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+.pet-crop-zoom-btn,
+.pet-crop-tool-btn {
+  padding: 3px 9px;
+  background: #fff;
+  border: 1px solid #d4b87a;
+  font-size: 11px;
+  color: #3a1a04;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+.pet-crop-zoom-btn:hover,
+.pet-crop-tool-btn:hover {
+  background: #fff5c8;
+  border-color: #d4874a;
+}
+
+.pet-crop-zoom-btn:disabled,
+.pet-crop-tool-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pet-crop-zoom-btn-active,
+.pet-crop-zoom-btn-active:hover {
+  background: #d4874a;
+  border-color: #b8642d;
+  color: #fff;
+  font-weight: bold;
+}
+
+/* ── 3. 操作提示行 ─────────────────── */
+.pet-crop-hint {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: #5a3a1a;
+  flex-wrap: wrap;
+}
+
+.pet-crop-hint kbd {
   background: #f0e6d0;
   border: 1px solid #d4b87a;
-  padding: 8px;
-  margin-bottom: 10px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  overflow: auto;
-  max-height: 380px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: inherit;
+  color: #3a1a04;
+  border-radius: 2px;
+  margin-right: 3px;
+  font-weight: normal;
 }
 
-/* stage 留 8px padding 让 overlay 4 边外凸手柄落在 padding 区，
-   不被父级 .pet-crop-stage-wrap 的 overflow:auto 裁掉 → 默认整图状态也能往外拖 */
+.pet-crop-hint-extra {
+  color: #8a7e5e;
+  font-style: italic;
+  margin-left: auto;
+}
+
+/* ── 4. 主舞台 ─────────────────────── */
+.pet-crop-stage-wrap {
+  background: #2a1808;
+  border: 1px solid #d4b87a;
+  text-align: center;
+  overflow: auto;
+  max-height: 380px;
+  position: relative;
+}
+
 .pet-crop-stage {
   display: inline-block;
   padding: 8px;
@@ -58,7 +168,6 @@
   user-select: none;
 }
 
-/* img + overlay 的共同容器，作为 overlay 的定位原点（严格对齐 img 左上） */
 .pet-crop-img-wrap {
   position: relative;
   display: inline-block;
@@ -73,158 +182,286 @@
   height: auto;
   image-rendering: pixelated;
   -webkit-user-drag: none;
+  pointer-events: none;
 }
 
-/* 裁切框 overlay */
-.pet-crop-overlay {
+/* 4 块暗罩：本身可点击触发 create 拖框（鼠标光标提示十字） */
+.pet-crop-shade {
   position: absolute;
-  box-sizing: border-box;
-  border: 2px dashed #d4874a;
-  background: rgba(212, 135, 74, 0.08);
-  pointer-events: none;
-  /* 显式禁止 user-select，避免拖拽时选中页面文字 */
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: auto;
+  cursor: crosshair;
   user-select: none;
 }
 
-/* 12 条等分线：竖向虚线 */
+/* 裁切框边框：温暖橙黄 */
+.pet-crop-overlay {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid #ffd478;
+  background: transparent;
+  pointer-events: auto;
+  user-select: none;
+  /* 在亮色暗罩上加一圈深色细线提升对比 */
+  box-shadow: 0 0 0 1px rgba(58, 26, 4, 0.7);
+}
+
+/* ── 11 条辅助线（带顶部圆点手柄）── */
 .pet-crop-divider {
   position: absolute;
   top: 0;
   bottom: 0;
   width: 0;
-  border-left: 1px dashed rgba(212, 135, 74, 0.55);
-  pointer-events: none;
+  border-left: 1px solid rgba(255, 212, 120, 0.75);
+  pointer-events: auto;
+  cursor: col-resize;
+  transition: border-color 0.1s;
 }
 
-/* 4 个边手柄：在 overlay 4 条边上各放一个长条手柄 */
+/* 透明 hitbox：以 1px 虚线为中心向左右各扩 5px，移动端友好 */
+.pet-crop-divider::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -5px;
+  width: 10px;
+  background: transparent;
+}
+
+/* 顶部圆点手柄：明确告诉用户"这里可以拖" */
+.pet-crop-divider-knob {
+  position: absolute;
+  top: -7px;
+  left: -5px;
+  width: 10px;
+  height: 10px;
+  background: #fff;
+  border: 1.5px solid #b8642d;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  transition: background 0.1s, transform 0.1s, border-color 0.1s;
+}
+
+.pet-crop-divider:hover {
+  border-left-color: #ffe066;
+  border-left-width: 2px;
+}
+
+.pet-crop-divider:hover .pet-crop-divider-knob {
+  background: #ffe066;
+  border-color: #8b3a14;
+  transform: scale(1.3);
+}
+
+.pet-crop-divider:active .pet-crop-divider-knob {
+  background: #d4874a;
+}
+
+/* ── 8 手柄：4 边长条 + 4 角实心方块 ── */
 .pet-crop-handle {
   position: absolute;
-  background: #d4874a;
   pointer-events: auto;
-  transition: background 0.1s;
+  transition: background 0.1s, transform 0.1s;
 }
 
-.pet-crop-handle:hover {
-  background: #b8642d;
-}
-
-.pet-crop-handle-top {
-  left: 0;
-  right: 0;
-  top: -4px;
+/* 4 边长条：默认透明（不挡画面），hover 才染色 */
+.pet-crop-handle-t,
+.pet-crop-handle-b {
+  left: 14px;
+  right: 14px;
   height: 8px;
+  background: transparent;
   cursor: ns-resize;
 }
 
-.pet-crop-handle-bottom {
-  left: 0;
-  right: 0;
-  bottom: -4px;
-  height: 8px;
-  cursor: ns-resize;
-}
-
-.pet-crop-handle-left {
-  top: 0;
-  bottom: 0;
-  left: -4px;
+.pet-crop-handle-l,
+.pet-crop-handle-r {
+  top: 14px;
+  bottom: 14px;
   width: 8px;
+  background: transparent;
   cursor: ew-resize;
 }
 
-.pet-crop-handle-right {
-  top: 0;
-  bottom: 0;
-  right: -4px;
-  width: 8px;
-  cursor: ew-resize;
+.pet-crop-handle-t { top: -4px; }
+.pet-crop-handle-b { bottom: -4px; }
+.pet-crop-handle-l { left: -4px; }
+.pet-crop-handle-r { right: -4px; }
+
+.pet-crop-handle-t:hover,
+.pet-crop-handle-b:hover,
+.pet-crop-handle-l:hover,
+.pet-crop-handle-r:hover {
+  background: rgba(255, 212, 120, 0.45);
 }
 
-/* 尺寸信息 */
-.pet-crop-stats {
-  background: #fff8e0;
-  border: 1px solid #e8d4b0;
+/* 4 角实心方块：明显的视觉手柄 */
+.pet-crop-corner {
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  border: 1.5px solid #b8642d;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
+
+.pet-crop-corner:hover {
+  background: #ffe066;
+  transform: scale(1.25);
+}
+
+.pet-crop-handle-tl { top: -6px;    left: -6px;    cursor: nwse-resize; }
+.pet-crop-handle-tr { top: -6px;    right: -6px;   cursor: nesw-resize; }
+.pet-crop-handle-bl { bottom: -6px; left: -6px;    cursor: nesw-resize; }
+.pet-crop-handle-br { bottom: -6px; right: -6px;   cursor: nwse-resize; }
+
+/* ── 5. 12 帧预览条 ───────────────── */
+.pet-crop-preview {
+  background: #f7f1e0;
+  border: 1px solid #d4b87a;
   padding: 8px 10px;
-  font-size: 12px;
-  color: #3a1a04;
-  margin-bottom: 8px;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 6px;
 }
 
-.pet-crop-stats-label {
-  color: #8b5e3c;
-  margin-right: 4px;
+.pet-crop-preview-label {
+  font-size: 11px;
+  color: #5a3a1a;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pet-crop-preview-label > span:first-child {
+  font-weight: bold;
+}
+
+.pet-crop-preview-sub {
+  color: #8a7e5e;
+  font-size: 10px;
+}
+
+.pet-crop-preview-strip {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.pet-crop-preview-frame {
+  flex-shrink: 0;
+  position: relative;
+  background: #fff;
+  border: 1px solid #d4b87a;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.pet-crop-preview-frame img {
+  max-width: 100%;
+  max-height: 100%;
+  image-rendering: pixelated;
+  display: block;
+}
+
+.pet-crop-preview-num {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  font-size: 9px;
+  background: rgba(58, 26, 4, 0.85);
+  color: #fff;
+  padding: 0 3px;
+  line-height: 1.4;
+  border-radius: 1px;
+  font-family: inherit;
+}
+
+.pet-crop-preview-frame-empty {
+  background: repeating-linear-gradient(
+    45deg,
+    #f7f1e0,
+    #f7f1e0 4px,
+    #ede1c5 4px,
+    #ede1c5 8px
+  );
+}
+
+/* 状态信息条（紧贴预览，inline 一行） */
+.pet-crop-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #5a3a1a;
+  flex-wrap: wrap;
+}
+
+.pet-crop-stats-bar strong {
+  color: #3a1a04;
+  font-weight: bold;
+}
+
+.pet-crop-stats-dot {
+  color: #c7b58a;
 }
 
 .pet-crop-stats-sub {
   color: #8a7e5e;
-  font-size: 11px;
-  margin-left: 6px;
 }
 
 .pet-crop-stats-bad {
   color: #b04a2a;
-  font-weight: bold;
 }
 
 .pet-crop-stats-warn {
   color: #b04a2a;
-  font-size: 11px;
-  margin-top: 2px;
+  font-weight: bold;
 }
 
-/* 预设按钮行 */
-.pet-crop-presets {
+/* ── 6. 表单 ───────────────────────── */
+.pet-crop-form {
   display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
-.pet-crop-presets button {
-  padding: 4px 10px;
-  background: #fff;
-  border: 1px solid #d4b87a;
-  font-size: 12px;
-  color: #3a1a04;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-.pet-crop-presets button:hover {
-  background: #fff5c8;
-  border-color: #d4874a;
-}
-
-.pet-crop-presets button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* 表单 */
 .pet-crop-form-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: 6px;
+  flex: 1 1 280px;
+  min-width: 240px;
 }
 
 .pet-crop-form-row label {
-  font-size: 12px;
+  font-size: 11px;
   color: #5a3a1a;
-  width: 80px;
+  width: 64px;
   flex-shrink: 0;
 }
 
 .pet-crop-form-row input {
   flex: 1;
-  padding: 6px 8px;
+  padding: 5px 8px;
   border: 1px solid #d4b87a;
   background: #fff;
   font-size: 12px;
   font-family: inherit;
+  color: #3a1a04;
+}
+
+.pet-crop-form-row input:focus {
+  outline: none;
+  border-color: #b8642d;
+  box-shadow: 0 0 0 2px rgba(212, 135, 74, 0.15);
 }
 
 .pet-crop-form-row input:disabled {
@@ -232,16 +469,39 @@
   color: #8a7e5e;
 }
 
-/* 操作行 */
+/* ── 7. 底部操作 ───────────────────── */
 .pet-crop-actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 8px;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 6px;
   border-top: 1px solid #e8d4b0;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
+.pet-crop-actions-tip {
+  font-size: 11px;
+  color: #8a7e5e;
+}
+
+.pet-crop-actions-tip kbd {
+  background: #f0e6d0;
+  border: 1px solid #d4b87a;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: inherit;
+  border-radius: 2px;
+  color: #3a1a04;
+  margin: 0 2px;
+}
+
+.pet-crop-actions-btns {
+  display: flex;
+  gap: 8px;
+}
+
+/* 复用 PetGallery 已有 .btn-test / .btn-save 样式，这里仅微调间距 */
 .pet-crop-actions .btn-test,
 .pet-crop-actions .btn-save {
   margin-top: 0;
