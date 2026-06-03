@@ -54,6 +54,11 @@ const DEFAULT_CONFIG: AppConfig = {
   ai_chat_hotkey: 'CommandOrControl+Shift+A',
   ai_chat_system_prompt: '',
   active_pet_pack: 'default-cat',
+  // Agent 工具黑名单：默认空（启用全部工具），用户可在设置页关掉某些工具
+  agent_disabled_tools: [],
+  // Agent 专用模型配置：默认空，回退到主聊天配置
+  agent_llm_api_url: '',
+  agent_llm_model: '',
 }
 
 // ── 配置 ──────────────────────────────────────

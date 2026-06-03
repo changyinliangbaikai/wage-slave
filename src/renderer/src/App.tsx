@@ -17,6 +17,7 @@ import {
   useOnBreakTrigger,
   useOnEveningTrigger,
   useOnEvent,
+  useOnAgentActiveChanged,
   getTodos,
   saveTodos,
   openSettings,
@@ -105,6 +106,21 @@ export default function App() {
       setTodayTodos(todos)
     }
   }, [todos, todosDate])
+
+  // ── Agent 全局活跃状态：AgentChat 对话 / 定时 Agent 在跑时让小猫切 busy 动画 ──
+  // 流程（晨间/晚间/总结）正在进行时，由各自的 trigger 自管 forceCatState，本 effect 不打扰；
+  // 只在 activeFlow === 'none' 的"空闲态"下，根据 agentActive 把 busy 加上去
+  // 依赖 activeFlow（而非 activeFlowRef）：流程结束 → effect 重跑 → 若 Agent 仍在跑则切回 busy
+  const [agentActive, setAgentActive] = useState(false)
+  useOnAgentActiveChanged(useCallback((p: { active: boolean; count: number }) => {
+    console.log(`[App] Agent 活跃状态变化: active=${p.active} count=${p.count}`)
+    setAgentActive(p.active)
+  }, []))
+  useEffect(() => {
+    // 流程独占小猫动画，本 effect 不干预
+    if (activeFlow !== 'none') return
+    setForceCatState(agentActive ? 'busy' : undefined)
+  }, [agentActive, activeFlow])
 
   // ── 心情 tier 变化 → 播一次情绪动画（仅在 idle 流程时，不打扰正在进行的流程） ──
   // 用 ref 记录上一次 tier；仅当 tier 真的变化才触发一次动画，避免反复播

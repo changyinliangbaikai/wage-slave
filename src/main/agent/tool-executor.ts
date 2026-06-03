@@ -24,6 +24,8 @@ import type {
   AgentToolCall,
   AgentToolResult,
   TodoItem,
+  ScheduledTask,
+  TaskSchedule,
 } from '@shared/types'
 import {
   getLog,
@@ -34,6 +36,7 @@ import {
   todayStr,
 } from '../store'
 import { assertSafePath, expandHome, checkCommand, confirmCommandWithUser } from './security'
+import { isToolEnabled } from './tool-registry'
 
 const execAsync = promisify(exec)
 
@@ -49,6 +52,12 @@ export async function executeTool(call: AgentToolCall): Promise<AgentToolResult>
 
   try {
     log.info(`[AgentTool] 执行: ${call.name}`, JSON.stringify(call.arguments).slice(0, 200))
+
+    // 二次校验：即使 LLM 用了过时 schema 调到了被禁用的工具，也必须拦在分发前
+    // 给 LLM 一个明确的错误，方便它换路径
+    if (!isToolEnabled(call.name)) {
+      throw new Error(`工具 "${call.name}" 已被用户在设置中关闭，本次会话不可用。请改用其他方式或提醒用户去「设置 → Agent 工具权限」启用。`)
+    }
 
     let raw: string
     switch (call.name) {
@@ -67,6 +76,12 @@ export async function executeTool(call: AgentToolCall): Promise<AgentToolResult>
       case 'update_todo':    raw = await toolUpdateTodo(call.arguments); break
       case 'append_log':     raw = await toolAppendLog(call.arguments); break
       case 'get_logs_range': raw = await toolGetLogsRange(call.arguments); break
+      // 定时任务管理（Phase 3.6）
+      case 'scheduler_list_tasks':  raw = await toolSchedulerListTasks(); break
+      case 'scheduler_create_task': raw = await toolSchedulerCreateTask(call.arguments); break
+      case 'scheduler_update_task': raw = await toolSchedulerUpdateTask(call.arguments); break
+      case 'scheduler_delete_task': raw = await toolSchedulerDeleteTask(call.arguments); break
+      case 'scheduler_toggle_task': raw = await toolSchedulerToggleTask(call.arguments); break
       // 系统操作
       case 'open_file':         raw = await toolOpenFile(call.arguments); break
       case 'show_notification': raw = await toolShowNotification(call.arguments); break
@@ -389,6 +404,202 @@ async function toolGetLogsRange(args: unknown): Promise<string> {
     const eod = l.eod_log ? `  复盘: ${l.eod_log.replace(/\s+/g, ' ').slice(0, 200)}` : ''
     return [`## ${l.date}`, todos, eod].filter(Boolean).join('\n')
   }).join('\n\n')
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 定时任务管理工具（Phase 3.6）
+// ═══════════════════════════════════════════════════════════════
+//
+// 使用动态 import 引入 task-scheduler，避免 tool-executor → task-scheduler →
+// agent/orchestrator → tool-executor 的潜在循环依赖。
+// 静态 import 在某些初始化顺序下会触发 "Cannot access X before initialization"
+
+async function loadScheduler(): Promise<typeof import('../tools/task-scheduler')> {
+  return await import('../tools/task-scheduler')
+}
+
+/** 把 TaskSchedule 渲染成人话给 LLM 看 */
+function formatScheduleStr(s: TaskSchedule): string {
+  if (s.type === 'interval') return `每 ${s.intervalMinutes ?? 60} 分钟`
+  if (s.type === 'daily') return `每日 ${s.time ?? '09:00'}`
+  if (s.type === 'weekly') {
+    const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+    return `每${wd[s.weekDay ?? 1]} ${s.time ?? '09:00'}`
+  }
+  return '未知'
+}
+
+async function toolSchedulerListTasks(): Promise<string> {
+  const { listTasks } = await loadScheduler()
+  const tasks = listTasks()
+  if (tasks.length === 0) return '当前没有任何定时任务'
+  return [
+    `共 ${tasks.length} 条定时任务：`,
+    ...tasks.map(t => {
+      const kind = t.kind ?? 'shell'
+      const status = t.enabled ? '启用' : '禁用'
+      const body = kind === 'agent'
+        ? `Agent输入="${(t.agentTask?.userInput ?? '').slice(0, 60)}"`
+        : `命令="${(t.command ?? '').slice(0, 60)}"`
+      return `- [${status}] ${t.name} (id=${t.id}, kind=${kind}, ${formatScheduleStr(t.schedule)}) ${body}`
+    }),
+  ].join('\n')
+}
+
+interface SchedulerCreateArgs {
+  name: string
+  kind: 'agent' | 'shell'
+  user_input?: string
+  command?: string
+  work_dir?: string
+  schedule_type: 'interval' | 'daily' | 'weekly'
+  interval_minutes?: number
+  time?: string
+  week_day?: number
+  enabled?: boolean
+}
+
+/** 校验并构造 TaskSchedule，参数缺失时给 LLM 明确的错误提示 */
+function buildScheduleFromArgs(
+  type: 'interval' | 'daily' | 'weekly',
+  args: { interval_minutes?: number; time?: string; week_day?: number },
+): TaskSchedule {
+  if (type === 'interval') {
+    const mins = args.interval_minutes
+    if (typeof mins !== 'number' || mins < 1 || mins > 1440) {
+      throw new Error('schedule_type=interval 时必须提供 1-1440 范围内的 interval_minutes')
+    }
+    return { type: 'interval', intervalMinutes: Math.floor(mins) }
+  }
+  // daily / weekly 共享 time 字段
+  const t = (args.time ?? '').trim()
+  if (!/^\d{1,2}:\d{2}$/.test(t)) {
+    throw new Error(`schedule_type=${type} 时必须提供 HH:mm 格式的 time，例如 09:00 或 18:30`)
+  }
+  const [hh, mm] = t.split(':').map(Number)
+  if (hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+    throw new Error(`time 不在合法范围：${t}`)
+  }
+  const time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
+  if (type === 'daily') return { type: 'daily', time }
+  // weekly
+  const wd = args.week_day
+  if (typeof wd !== 'number' || wd < 0 || wd > 6) {
+    throw new Error('schedule_type=weekly 时必须提供 week_day (0=周日 ... 6=周六)')
+  }
+  return { type: 'weekly', time, weekDay: Math.floor(wd) }
+}
+
+async function toolSchedulerCreateTask(args: unknown): Promise<string> {
+  const a = pickArgs<SchedulerCreateArgs>(args, ['name', 'kind', 'schedule_type'])
+
+  // 校验 kind 对应的必填字段
+  if (a.kind === 'agent' && !(a.user_input ?? '').trim()) {
+    throw new Error('kind=agent 时必须提供 user_input（触发时投喂给 Agent 的指令文本）')
+  }
+  if (a.kind === 'shell' && !(a.command ?? '').trim()) {
+    throw new Error('kind=shell 时必须提供 command')
+  }
+
+  const schedule = buildScheduleFromArgs(a.schedule_type, a)
+
+  const { saveTask } = await loadScheduler()
+  const draft: Partial<ScheduledTask> & { name: string } = {
+    name: a.name.trim().slice(0, 50),
+    kind: a.kind,
+    command: a.kind === 'shell' ? a.command!.trim() : '',
+    workDir: a.kind === 'shell' ? (a.work_dir ?? '') : '',
+    schedule,
+    enabled: a.enabled ?? true,
+  }
+  if (a.kind === 'agent') {
+    draft.agentTask = { userInput: a.user_input!.trim() }
+  }
+
+  const task = saveTask(draft)
+  log.info(`[AgentTool] scheduler_create_task: id=${task.id} name="${task.name}" kind=${task.kind} ${formatScheduleStr(task.schedule)}`)
+  return [
+    `✅ 已创建定时任务：${task.name}`,
+    `id：${task.id}`,
+    `类型：${task.kind ?? 'shell'}`,
+    `调度：${formatScheduleStr(task.schedule)}`,
+    `状态：${task.enabled ? '已启用' : '已禁用'}`,
+  ].join('\n')
+}
+
+interface SchedulerUpdateArgs {
+  id: string
+  name?: string
+  user_input?: string
+  command?: string
+  work_dir?: string
+  schedule_type?: 'interval' | 'daily' | 'weekly'
+  interval_minutes?: number
+  time?: string
+  week_day?: number
+  enabled?: boolean
+}
+
+async function toolSchedulerUpdateTask(args: unknown): Promise<string> {
+  const a = pickArgs<SchedulerUpdateArgs>(args, ['id'])
+  const { listTasks, saveTask } = await loadScheduler()
+  const existing = listTasks().find(t => t.id === a.id)
+  if (!existing) throw new Error(`定时任务不存在: ${a.id}`)
+
+  // 在旧值之上叠加：未传的字段保持原值
+  const merged: Partial<ScheduledTask> & { name: string } = {
+    ...existing,
+    name: (a.name ?? existing.name).trim().slice(0, 50),
+  }
+  if (a.command !== undefined) merged.command = a.command.trim()
+  if (a.work_dir !== undefined) merged.workDir = a.work_dir
+  if (a.enabled !== undefined) merged.enabled = a.enabled
+  if (a.user_input !== undefined) {
+    merged.agentTask = { userInput: a.user_input.trim() }
+  }
+
+  if (a.schedule_type) {
+    // 整体替换 schedule（必须重新校验全部字段）
+    merged.schedule = buildScheduleFromArgs(a.schedule_type, a)
+  } else {
+    // 同类型下覆盖局部字段，复用原 type
+    const s: TaskSchedule = { ...existing.schedule }
+    if (a.interval_minutes !== undefined && s.type === 'interval') s.intervalMinutes = a.interval_minutes
+    if (a.time !== undefined && (s.type === 'daily' || s.type === 'weekly')) s.time = a.time
+    if (a.week_day !== undefined && s.type === 'weekly') s.weekDay = a.week_day
+    merged.schedule = s
+  }
+
+  const updated = saveTask(merged)
+  log.info(`[AgentTool] scheduler_update_task: id=${updated.id} name="${updated.name}" ${formatScheduleStr(updated.schedule)}`)
+  return [
+    `✅ 已更新定时任务：${updated.name}`,
+    `id：${updated.id}`,
+    `调度：${formatScheduleStr(updated.schedule)}`,
+    `状态：${updated.enabled ? '已启用' : '已禁用'}`,
+  ].join('\n')
+}
+
+interface SchedulerIdArg { id: string }
+
+async function toolSchedulerDeleteTask(args: unknown): Promise<string> {
+  const { id } = pickArgs<SchedulerIdArg>(args, ['id'])
+  const { listTasks, deleteTask } = await loadScheduler()
+  const target = listTasks().find(t => t.id === id)
+  if (!target) throw new Error(`定时任务不存在: ${id}`)
+  const ok = deleteTask(id)
+  if (!ok) throw new Error(`删除失败: ${id}`)
+  log.info(`[AgentTool] scheduler_delete_task: id=${id} name="${target.name}"`)
+  return `🗑 已删除定时任务：${target.name} (id=${id})`
+}
+
+async function toolSchedulerToggleTask(args: unknown): Promise<string> {
+  const { id } = pickArgs<SchedulerIdArg>(args, ['id'])
+  const { toggleTask } = await loadScheduler()
+  const task = toggleTask(id)
+  if (!task) throw new Error(`定时任务不存在: ${id}`)
+  log.info(`[AgentTool] scheduler_toggle_task: id=${task.id} enabled=${task.enabled}`)
+  return `${task.enabled ? '▶ 已启用' : '⏸ 已禁用'} 定时任务：${task.name} (id=${task.id})`
 }
 
 // ═══════════════════════════════════════════════════════════════

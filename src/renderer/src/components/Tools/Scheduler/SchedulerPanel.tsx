@@ -7,8 +7,15 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { IPC } from '@shared/ipc-channels'
-import type { ScheduledTask, TaskSchedule, ScheduleType } from '@shared/types'
+import type { ScheduledTask, TaskSchedule, ScheduleType, TaskKind } from '@shared/types'
 import TaskLogViewer from './TaskLogViewer'
+import { AGENT_CRON_TEMPLATES, type AgentCronTemplate } from './templates'
+import {
+  parseTaskFromNL,
+  stopScheduledExecution,
+  useOnSchedulerTaskUpdate,
+  useOnSchedulerTasksChanged,
+} from '../../../hooks/useIPC'
 import './SchedulerPanel.css'
 
 interface Props {
@@ -48,6 +55,8 @@ const defaultForm = {
   name: '',
   command: '',
   workDir: '',
+  kind: 'shell' as TaskKind,
+  userInput: '',
   scheduleType: 'daily' as ScheduleType,
   intervalMinutes: 60,
   time: '09:00',
@@ -64,6 +73,12 @@ export default function SchedulerPanel({ onBack }: Props) {
   const [form, setForm] = useState({ ...defaultForm })
   const [saving, setSaving] = useState(false)
 
+  // 自然语言生成任务
+  const [nlOpen, setNlOpen] = useState(false)
+  const [nlText, setNlText] = useState('')
+  const [nlParsing, setNlParsing] = useState(false)
+  const [nlError, setNlError] = useState<string | null>(null)
+
   // 加载任务列表
   const loadTasks = useCallback(async () => {
     const result = await window.electronAPI.invoke(IPC.SCHEDULER_LIST_TASKS) as ScheduledTask[]
@@ -72,15 +87,55 @@ export default function SchedulerPanel({ onBack }: Props) {
 
   useEffect(() => {
     loadTasks()
-    // 定时刷新任务状态（每 5 秒）
-    const timer = setInterval(loadTasks, 5000)
+    // 兜底轮询（10s）：避免 IPC 推送丢失导致 UI 长时间不刷新
+    const timer = setInterval(loadTasks, 10000)
     return () => clearInterval(timer)
   }, [loadTasks])
+
+  // 订阅任务状态变化（主进程在 running/success/failed 切换时推送）
+  useOnSchedulerTaskUpdate(useCallback(() => {
+    // 收到状态变化立即刷新列表，UI 即时显示运行中/完成
+    loadTasks()
+  }, [loadTasks]))
+
+  // 订阅任务列表 CRUD 变化（特别针对 Agent 在对话里通过 scheduler_* 工具修改的场景）
+  // 短暂闪一下浮提示，让用户知道是 Agent 帮他改的
+  const [crudToast, setCrudToast] = useState<string | null>(null)
+  useOnSchedulerTasksChanged(useCallback((p: { action: 'create' | 'update' | 'delete' | 'toggle'; taskId?: string }) => {
+    loadTasks()
+    const actionText = p.action === 'create' ? '新建'
+      : p.action === 'update' ? '已更新'
+      : p.action === 'delete' ? '已删除'
+      : '已启停'
+    setCrudToast(`🐱 任务${actionText}`)
+    // 3 秒后自动消失
+    window.setTimeout(() => setCrudToast(null), 3000)
+  }, [loadTasks]))
 
   // 打开新建表单
   const handleNew = useCallback(() => {
     setEditingTaskId(null)
     setForm({ ...defaultForm })
+    setView('form')
+  }, [])
+
+  // 模板选择弹层
+  const [templateModalOpen, setTemplateModalOpen] = useState(false)
+
+  // 应用模板：预填 form 后跳到表单视图继续微调
+  const handleApplyTemplate = useCallback((tpl: AgentCronTemplate) => {
+    setEditingTaskId(null)
+    setForm({
+      ...defaultForm,
+      name: tpl.name,
+      kind: 'agent',
+      userInput: tpl.userInput,
+      scheduleType: tpl.schedule.type,
+      intervalMinutes: tpl.schedule.intervalMinutes ?? 60,
+      time: tpl.schedule.time ?? '09:00',
+      weekDay: tpl.schedule.weekDay ?? 1,
+    })
+    setTemplateModalOpen(false)
     setView('form')
   }, [])
 
@@ -91,6 +146,8 @@ export default function SchedulerPanel({ onBack }: Props) {
       name: task.name,
       command: task.command,
       workDir: task.workDir,
+      kind: task.kind ?? 'shell',
+      userInput: task.agentTask?.userInput ?? '',
       scheduleType: task.schedule.type,
       intervalMinutes: task.schedule.intervalMinutes ?? 60,
       time: task.schedule.time ?? '09:00',
@@ -102,7 +159,10 @@ export default function SchedulerPanel({ onBack }: Props) {
 
   // 保存任务
   const handleSave = useCallback(async () => {
-    if (!form.name.trim() || !form.command.trim()) return
+    // 校验：名称必填；shell 模式 command 必填；agent 模式 userInput 必填
+    if (!form.name.trim()) return
+    if (form.kind === 'shell' && !form.command.trim()) return
+    if (form.kind === 'agent' && !form.userInput.trim()) return
 
     setSaving(true)
     const schedule: TaskSchedule = {
@@ -112,14 +172,29 @@ export default function SchedulerPanel({ onBack }: Props) {
       ...(form.scheduleType === 'weekly' && { weekDay: form.weekDay }),
     }
 
-    await window.electronAPI.invoke(IPC.SCHEDULER_SAVE_TASK, {
-      ...(editingTaskId && { id: editingTaskId }),
-      name: form.name.trim(),
-      command: form.command.trim(),
-      workDir: form.workDir,
-      schedule,
-      enabled: form.enabled,
-    })
+    // 按 kind 装载执行体字段
+    const payload = form.kind === 'agent'
+      ? {
+          ...(editingTaskId && { id: editingTaskId }),
+          name: form.name.trim(),
+          command: '',
+          workDir: '',
+          schedule,
+          enabled: form.enabled,
+          kind: 'agent' as TaskKind,
+          agentTask: { userInput: form.userInput.trim() },
+        }
+      : {
+          ...(editingTaskId && { id: editingTaskId }),
+          name: form.name.trim(),
+          command: form.command.trim(),
+          workDir: form.workDir,
+          schedule,
+          enabled: form.enabled,
+          kind: 'shell' as TaskKind,
+        }
+
+    await window.electronAPI.invoke(IPC.SCHEDULER_SAVE_TASK, payload)
 
     setSaving(false)
     await loadTasks()
@@ -145,6 +220,51 @@ export default function SchedulerPanel({ onBack }: Props) {
     // 短暂延迟后刷新状态
     setTimeout(loadTasks, 500)
   }, [loadTasks])
+
+  // 中止正在运行的任务（Agent 任务尤其需要）
+  const handleStop = useCallback(async (taskId: string) => {
+    if (!confirm('确定要终止当前正在运行的执行吗？')) return
+    await stopScheduledExecution(taskId)
+    // 给主进程一点时间触发 close/finally 写入 failed 状态
+    setTimeout(loadTasks, 600)
+  }, [loadTasks])
+
+  // 自然语言 → 任务草稿，直接套到表单
+  const handleParseNL = useCallback(async () => {
+    const text = nlText.trim()
+    if (!text) return
+    setNlParsing(true)
+    setNlError(null)
+    try {
+      const res = await parseTaskFromNL(text)
+      if (!res.ok || !res.task) {
+        setNlError(res.error || '解析失败，请改写后重试')
+        return
+      }
+      const t = res.task
+      const sched = t.schedule
+      setEditingTaskId(null)
+      setForm({
+        ...defaultForm,
+        name: t.name || '',
+        kind: (t.kind ?? 'agent') as TaskKind,
+        command: t.command ?? '',
+        userInput: t.userInput ?? t.agentTask?.userInput ?? '',
+        scheduleType: (sched?.type ?? 'daily') as ScheduleType,
+        intervalMinutes: sched?.intervalMinutes ?? 60,
+        time: sched?.time ?? '09:00',
+        weekDay: sched?.weekDay ?? 1,
+        enabled: t.enabled ?? true,
+      })
+      setNlOpen(false)
+      setNlText('')
+      setView('form')
+    } catch (e) {
+      setNlError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setNlParsing(false)
+    }
+  }, [nlText])
 
   // 查看日志
   const handleViewLogs = useCallback((task: ScheduledTask) => {
@@ -192,32 +312,72 @@ export default function SchedulerPanel({ onBack }: Props) {
             />
           </div>
 
-          {/* 执行命令 */}
+          {/* 任务类型 */}
           <div className="form-group">
-            <label>执行命令</label>
-            <textarea
-              value={form.command}
-              onChange={e => setForm(f => ({ ...f, command: e.target.value }))}
-              placeholder="例如：python /path/to/script.py"
-              className="form-textarea"
-              rows={3}
-            />
-          </div>
-
-          {/* 工作目录 */}
-          <div className="form-group">
-            <label>工作目录（可选）</label>
-            <div className="dir-select-row">
-              <input
-                type="text"
-                value={form.workDir}
-                onChange={e => setForm(f => ({ ...f, workDir: e.target.value }))}
-                placeholder="命令执行时的工作目录"
-                className="form-input dir-input"
-              />
-              <button className="btn-browse" onClick={handleSelectDir}>浏览</button>
+            <label>任务类型</label>
+            <div className="schedule-type-tabs">
+              <button
+                className={`schedule-tab ${form.kind === 'shell' ? 'active' : ''}`}
+                onClick={() => setForm(f => ({ ...f, kind: 'shell' }))}
+              >
+                🖥️ Shell 命令
+              </button>
+              <button
+                className={`schedule-tab ${form.kind === 'agent' ? 'active' : ''}`}
+                onClick={() => setForm(f => ({ ...f, kind: 'agent' }))}
+              >
+                🤖 Agent 任务
+              </button>
             </div>
           </div>
+
+          {form.kind === 'shell' ? (
+            <>
+              {/* 执行命令 */}
+              <div className="form-group">
+                <label>执行命令</label>
+                <textarea
+                  value={form.command}
+                  onChange={e => setForm(f => ({ ...f, command: e.target.value }))}
+                  placeholder="例如：python /path/to/script.py"
+                  className="form-textarea"
+                  rows={3}
+                />
+              </div>
+
+              {/* 工作目录 */}
+              <div className="form-group">
+                <label>工作目录（可选）</label>
+                <div className="dir-select-row">
+                  <input
+                    type="text"
+                    value={form.workDir}
+                    onChange={e => setForm(f => ({ ...f, workDir: e.target.value }))}
+                    placeholder="命令执行时的工作目录"
+                    className="form-input dir-input"
+                  />
+                  <button className="btn-browse" onClick={handleSelectDir}>浏览</button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Agent 任务描述 */}
+              <div className="form-group">
+                <label>Agent 任务描述</label>
+                <textarea
+                  value={form.userInput}
+                  onChange={e => setForm(f => ({ ...f, userInput: e.target.value }))}
+                  placeholder="例如：复盘今天 / 生成本周周报 / 整理桌面"
+                  className="form-textarea"
+                  rows={3}
+                />
+                <p className="form-hint" style={{ fontSize: 12, color: '#8b7a5d', margin: '4px 0 0' }}>
+                  触发时会用这段文本启动 Agent，命中的技能会自动注入引导
+                </p>
+              </div>
+            </>
+          )}
 
           {/* 调度方式 */}
           <div className="form-group">
@@ -313,7 +473,12 @@ export default function SchedulerPanel({ onBack }: Props) {
             <button
               className="btn-save"
               onClick={handleSave}
-              disabled={!form.name.trim() || !form.command.trim() || saving}
+              disabled={
+                !form.name.trim() ||
+                saving ||
+                (form.kind === 'shell' && !form.command.trim()) ||
+                (form.kind === 'agent' && !form.userInput.trim())
+              }
             >
               {saving ? '保存中...' : '保存任务'}
             </button>
@@ -332,8 +497,54 @@ export default function SchedulerPanel({ onBack }: Props) {
       <div className="panel-header">
         <button className="btn-back" onClick={onBack}>← 返回</button>
         <h3>⏰ 定时任务</h3>
-        <button className="btn-new-task" onClick={handleNew}>+ 新建</button>
+        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+          <button
+            className="btn-new-task"
+            onClick={() => { setNlOpen(o => !o); setNlError(null) }}
+            title="用一句话描述任务，AI 自动生成草稿"
+          >
+            🪄 AI 生成
+          </button>
+          <button className="btn-new-task" onClick={() => setTemplateModalOpen(true)} title="从模板快速创建">
+            📋 模板
+          </button>
+          <button className="btn-new-task" onClick={handleNew}>+ 新建</button>
+        </div>
       </div>
+
+      {/* AI 自然语言输入面板 */}
+      {nlOpen && (
+        <div className="nl-panel">
+          <p className="nl-tip">
+            用一句话说出你的需求，例如：<em>每天早上 9 点提醒我喝水并写句鼓励的话</em>
+          </p>
+          <textarea
+            className="form-textarea"
+            rows={2}
+            value={nlText}
+            onChange={e => setNlText(e.target.value)}
+            placeholder="每天 / 每周 / 每隔 N 分钟… 我希望…"
+            disabled={nlParsing}
+          />
+          {nlError && <div className="nl-error">⚠ {nlError}</div>}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 6 }}>
+            <button
+              className="btn-cancel"
+              onClick={() => { setNlOpen(false); setNlText(''); setNlError(null) }}
+              disabled={nlParsing}
+            >
+              取消
+            </button>
+            <button
+              className="btn-save"
+              onClick={handleParseNL}
+              disabled={nlParsing || !nlText.trim()}
+            >
+              {nlParsing ? '解析中…' : '生成草稿 →'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {tasks.length === 0 ? (
         <div className="empty-state">
@@ -342,22 +553,37 @@ export default function SchedulerPanel({ onBack }: Props) {
           <button className="btn-new-task-large" onClick={handleNew}>创建第一个任务</button>
         </div>
       ) : (
+        <>
         <div className="task-list">
           {tasks.map(task => (
             <div key={task.id} className={`task-card ${task.enabled ? '' : 'disabled'}`}>
               <div className="task-header">
                 <span className="task-status">{statusIcon(task.lastRunStatus)}</span>
                 <span className="task-name">{task.name}</span>
+                <span
+                  className="task-kind-badge"
+                  title={(task.kind ?? 'shell') === 'agent' ? 'Agent 任务' : 'Shell 命令'}
+                  style={{ marginLeft: 6 }}
+                >
+                  {(task.kind ?? 'shell') === 'agent' ? '🤖' : '🖥️'}
+                </span>
                 <span className={`task-enable-badge ${task.enabled ? 'on' : 'off'}`}>
                   {task.enabled ? '运行中' : '已禁用'}
                 </span>
               </div>
 
               <div className="task-info">
-                <div className="task-command" title={task.command}>
-                  <span className="info-label">命令：</span>
-                  <code>{task.command}</code>
-                </div>
+                {(task.kind ?? 'shell') === 'agent' ? (
+                  <div className="task-command" title={task.agentTask?.userInput}>
+                    <span className="info-label">任务：</span>
+                    <code>{task.agentTask?.userInput ?? ''}</code>
+                  </div>
+                ) : (
+                  <div className="task-command" title={task.command}>
+                    <span className="info-label">命令：</span>
+                    <code>{task.command}</code>
+                  </div>
+                )}
                 <div className="task-schedule">
                   <span className="info-label">调度：</span>
                   {formatSchedule(task.schedule)}
@@ -371,9 +597,19 @@ export default function SchedulerPanel({ onBack }: Props) {
               </div>
 
               <div className="task-actions">
-                <button className="btn-action btn-run" onClick={() => handleRun(task.id)} title="立即执行">
-                  ▶ 执行
-                </button>
+                {task.lastRunStatus === 'running' ? (
+                  <button
+                    className="btn-action btn-stop"
+                    onClick={() => handleStop(task.id)}
+                    title="立即终止正在运行的执行"
+                  >
+                    ⏹ 停止
+                  </button>
+                ) : (
+                  <button className="btn-action btn-run" onClick={() => handleRun(task.id)} title="立即执行">
+                    ▶ 执行
+                  </button>
+                )}
                 <button className="btn-action btn-logs" onClick={() => handleViewLogs(task)} title="查看日志">
                   📋 日志
                 </button>
@@ -389,6 +625,40 @@ export default function SchedulerPanel({ onBack }: Props) {
               </div>
             </div>
           ))}
+        </div>
+        </>
+      )}
+
+      {/* Agent 改任务时的浮动提示 */}
+      {crudToast && <div className="crud-toast">{crudToast}</div>}
+
+      {/* 模板选择弹层 */}
+      {templateModalOpen && (
+        <div className="template-modal-mask" onClick={() => setTemplateModalOpen(false)}>
+          <div className="template-modal" onClick={e => e.stopPropagation()}>
+            <h3>📋 选择任务模板</h3>
+            <p>应用后可继续修改名称/时间/任务描述。模板均为 Agent 任务，触发后会自动匹配技能。</p>
+            <div className="template-grid">
+              {AGENT_CRON_TEMPLATES.map(tpl => (
+                <button
+                  key={tpl.id}
+                  type="button"
+                  className="template-card"
+                  onClick={() => handleApplyTemplate(tpl)}
+                >
+                  <div className="template-icon">{tpl.icon}</div>
+                  <div className="template-name">{tpl.name}</div>
+                  <div className="template-desc">{tpl.description}</div>
+                  <div className="template-schedule">{formatSchedule(tpl.schedule)}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
+              <button className="btn-cancel" onClick={() => setTemplateModalOpen(false)}>
+                关闭
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

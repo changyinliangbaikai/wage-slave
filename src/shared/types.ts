@@ -42,6 +42,36 @@ export interface AppConfig {
   ai_chat_window_bounds?: { x: number; y: number; width: number; height: number }
   /** 当前激活的桌宠包 id，默认 'default-cat' */
   active_pet_pack: string
+  /**
+   * Agent 工具黑名单：被列出的工具名将从 tool-registry 中过滤掉，LLM 看不到
+   * 也无法调用。默认空数组（启用全部工具）。
+   */
+  agent_disabled_tools?: string[]
+  /**
+   * Agent 专用 LLM API URL（可选）。如果不填，回退到主聊天的 llm_api_url
+   */
+  agent_llm_api_url?: string
+  /**
+   * Agent 专用模型名称（可选）。如果不填，回退到主聊天的 llm_model
+   */
+  agent_llm_model?: string
+}
+
+/** Agent 工具分组元数据（仅用于设置页 UI 渲染） */
+export interface AgentToolGroupMeta {
+  id: string
+  label: string
+  description: string
+  toolNames: string[]
+  dangerous?: boolean
+}
+
+/** Agent 安全策略（用于设置页展示） */
+export interface AgentSecurityPolicy {
+  /** 路径白名单（绝对路径前缀） */
+  allowedPaths: string[]
+  /** 命令黑名单规则（正则描述 + 原因） */
+  commandBlacklist: { pattern: string; reason: string }[]
 }
 
 /** AI 对话附件（txt / md / docx / doc 读取后的文本 + 元数据） */
@@ -355,12 +385,24 @@ export interface TaskSchedule {
   weekDay?: number
 }
 
+/** 任务执行体类型（Phase 3：扩展为 shell 或 agent） */
+export type TaskKind = 'shell' | 'agent'
+
+/** Agent 任务参数（kind=agent 时使用） */
+export interface AgentTaskSpec {
+  /** 触发时投喂给 Agent 的"用户输入" */
+  userInput: string
+}
+
 /** 定时任务 */
 export interface ScheduledTask {
   id: string
   /** 任务名称 */
   name: string
-  /** 执行命令 */
+  /**
+   * 执行命令（shell 模式必填；agent 模式留空字符串）
+   * 保留为必填以兼容旧 tasks.json
+   */
   command: string
   /** 工作目录 */
   workDir: string
@@ -376,6 +418,10 @@ export interface ScheduledTask {
   lastRunAt?: string
   /** 最近执行状态 */
   lastRunStatus?: 'success' | 'failed' | 'running'
+  /** 任务执行体（默认 shell，向后兼容） */
+  kind?: TaskKind
+  /** Agent 任务参数（仅 kind=agent 时存在） */
+  agentTask?: AgentTaskSpec
 }
 
 /** 任务执行记录 */
@@ -513,6 +559,8 @@ export interface AgentDonePayload {
     toolCalls: number
     totalDurationMs: number
   }
+  /** 本次结束是否由用户主动中断触发（true 时上游应视为 failed） */
+  aborted?: boolean
 }
 
 export interface AgentErrorPayload {
@@ -559,4 +607,85 @@ export interface AgentNotificationPayload {
   body?: string
   /** 通知来源类型 */
   type?: 'tool' | 'cron-result' | 'general'
+}
+
+// ─────────────────────────────────────────────
+// Agent Skill 系统类型（Phase 2）
+// ─────────────────────────────────────────────
+
+/** Skill 来源：内置 / 用户安装 / 远程市场 */
+export type SkillScope = 'builtin' | 'user' | 'remote'
+
+/** Skill 分类 */
+export type SkillCategory =
+  | 'productivity' // 生产力：计划、复盘、总结
+  | 'file' // 文件：整理、搜索、转换
+  | 'code' // 代码：审查、生成、重构
+  | 'writing' // 写作：润色、翻译、摘要
+  | 'automation' // 自动化：定时、批处理
+  | 'custom' // 自定义
+
+/**
+ * Agent 技能（预定义工作流模板）
+ * 类比：工具是"锤子"，Skill 是"装修方案"
+ * 命中 triggers 后把 systemPromptAddition 注入到 System Prompt
+ */
+export interface AgentSkill {
+  /** 唯一 id（kebab-case） */
+  id: string
+  /** 显示名称 */
+  name: string
+  /** 一句话描述 */
+  description: string
+  /** 分类 */
+  category: SkillCategory
+  /** emoji 图标 */
+  icon: string
+  /** 作者 */
+  author: string
+  /** 版本号（semver） */
+  version: string
+  /** 触发关键词：用户输入命中任一即激活该技能 */
+  triggers: string[]
+  /** 激活后注入 System Prompt 的技能说明（含执行步骤） */
+  systemPromptAddition: string
+  /** 推荐使用的工具名（仅提示，不强制限制） */
+  recommendedTools?: string[]
+  /** 来源 */
+  scope: SkillScope
+  /** 元信息 */
+  meta?: {
+    tags?: string[]
+    createdAt?: string
+    updatedAt?: string
+  }
+}
+
+/** Skill 安装/启停记录（持久化在 installs.json） */
+export interface SkillInstallRecord {
+  skillId: string
+  /** 安装时间（ISO） */
+  installedAt: string
+  /** 来源 */
+  source: SkillScope
+  /** 是否启用（停用后不参与匹配注入） */
+  enabled: boolean
+}
+
+/** 带安装/启用状态的 Skill（列表展示用） */
+export interface SkillWithState extends AgentSkill {
+  /** 是否已安装（内置恒为 true） */
+  installed: boolean
+  /** 是否启用 */
+  enabled: boolean
+}
+
+/** 市场中的 Skill 条目（含安装统计等发现信息） */
+export interface MarketSkillItem extends AgentSkill {
+  /** 远程下载地址（skill.json） */
+  downloadUrl?: string
+  /** 安装次数（展示用） */
+  installs?: number
+  /** 评分 0-5 */
+  rating?: number
 }

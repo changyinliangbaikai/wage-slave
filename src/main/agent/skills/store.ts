@@ -1,0 +1,220 @@
+/**
+ * Skill 存储与管理
+ *
+ * 存储布局（app.getPath('userData')/skills/）：
+ *   skills/
+ *     installs.json      // 安装/启停记录（含内置 skill 的启停覆盖）
+ *     user/              // 用户安装的 skill，每个一个 <id>.json
+ *
+ * 设计：
+ *  - 内置 skill 来自 built-in.ts，恒为"已安装"，启停状态可被 installs.json 覆盖
+ *  - 用户 / 远程 skill 落地为 user/<id>.json
+ *  - 原子写入（写 .tmp 再 rename），避免半写损坏
+ */
+
+import * as fs from 'fs'
+import * as path from 'path'
+import { app } from 'electron'
+import log from 'electron-log/main'
+import type { AgentSkill, SkillInstallRecord, SkillWithState } from '@shared/types'
+import { BUILT_IN_SKILLS } from './built-in'
+
+const SKILLS_DIR = path.join(app.getPath('userData'), 'skills')
+const INSTALLS_FILE = path.join(SKILLS_DIR, 'installs.json')
+const USER_SKILLS_DIR = path.join(SKILLS_DIR, 'user')
+
+// ── 目录初始化 ─────────────────────────────────
+
+function ensureDirs(): void {
+  fs.mkdirSync(SKILLS_DIR, { recursive: true })
+  fs.mkdirSync(USER_SKILLS_DIR, { recursive: true })
+}
+
+/** 原子写 JSON */
+function writeJsonAtomic(file: string, data: unknown): void {
+  const tmp = `${file}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8')
+  fs.renameSync(tmp, file)
+}
+
+// ── 安装/启停记录 ──────────────────────────────
+
+/** 读取全部安装记录 */
+export function getInstallRecords(): SkillInstallRecord[] {
+  ensureDirs()
+  try {
+    if (!fs.existsSync(INSTALLS_FILE)) return []
+    return JSON.parse(fs.readFileSync(INSTALLS_FILE, 'utf-8')) as SkillInstallRecord[]
+  } catch (e) {
+    log.warn('[Skill] 读取安装记录失败:', e)
+    return []
+  }
+}
+
+function saveInstallRecords(records: SkillInstallRecord[]): void {
+  ensureDirs()
+  writeJsonAtomic(INSTALLS_FILE, records)
+}
+
+/** 写入或更新单条安装记录 */
+function upsertInstallRecord(record: SkillInstallRecord): void {
+  const records = getInstallRecords()
+  const idx = records.findIndex(r => r.skillId === record.skillId)
+  if (idx >= 0) records[idx] = record
+  else records.push(record)
+  saveInstallRecords(records)
+}
+
+// ── 用户 Skill 加载 ────────────────────────────
+
+/** 加载 user 目录下的全部 skill */
+export function loadUserSkills(): AgentSkill[] {
+  ensureDirs()
+  const result: AgentSkill[] = []
+  try {
+    const files = fs.readdirSync(USER_SKILLS_DIR).filter(f => f.endsWith('.json'))
+    for (const f of files) {
+      try {
+        const raw = fs.readFileSync(path.join(USER_SKILLS_DIR, f), 'utf-8')
+        const skill = JSON.parse(raw) as AgentSkill
+        if (validateSkill(skill)) result.push(skill)
+        else log.warn(`[Skill] 跳过无效 skill 文件: ${f}`)
+      } catch (e) {
+        log.warn(`[Skill] 解析 skill 文件失败 ${f}:`, e)
+      }
+    }
+  } catch (e) {
+    log.warn('[Skill] 读取用户 skill 目录失败:', e)
+  }
+  return result
+}
+
+/** 校验一个 skill 是否字段合法 */
+export function validateSkill(s: unknown): s is AgentSkill {
+  if (!s || typeof s !== 'object') return false
+  const sk = s as Record<string, unknown>
+  return (
+    typeof sk.id === 'string' &&
+    sk.id.length > 0 &&
+    typeof sk.name === 'string' &&
+    typeof sk.description === 'string' &&
+    typeof sk.systemPromptAddition === 'string' &&
+    Array.isArray(sk.triggers)
+  )
+}
+
+// ── 查询 ───────────────────────────────────────
+
+/** 获取全部可用 skill（内置 + 用户），附带安装/启用状态 */
+export function getAllSkills(): SkillWithState[] {
+  const records = getInstallRecords()
+  const recordMap = new Map(records.map(r => [r.skillId, r]))
+
+  const toState = (s: AgentSkill, installed: boolean): SkillWithState => ({
+    ...s,
+    installed,
+    // 默认启用；installs.json 中若存在记录则以记录为准
+    enabled: recordMap.get(s.id)?.enabled ?? true,
+  })
+
+  const builtins = BUILT_IN_SKILLS.map(s => toState(s, true))
+  const userSkills = loadUserSkills().map(s => toState(s, true))
+
+  // 用户 skill 若与内置同 id，则用户覆盖内置
+  const merged = new Map<string, SkillWithState>()
+  for (const s of builtins) merged.set(s.id, s)
+  for (const s of userSkills) merged.set(s.id, s)
+  return [...merged.values()]
+}
+
+/** 仅返回"已启用"的 skill（matcher 注入用） */
+export function getEnabledSkills(): AgentSkill[] {
+  return getAllSkills().filter(s => s.enabled)
+}
+
+/** 按 id 获取 skill */
+export function getSkillById(id: string): SkillWithState | null {
+  return getAllSkills().find(s => s.id === id) ?? null
+}
+
+/** 按分类获取 */
+export function getSkillsByCategory(category: string): SkillWithState[] {
+  return getAllSkills().filter(s => s.category === category)
+}
+
+/** 关键词搜索（名称 / 描述 / triggers / tags） */
+export function searchSkills(query: string): SkillWithState[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return getAllSkills()
+  return getAllSkills().filter(
+    s =>
+      s.name.toLowerCase().includes(q) ||
+      s.description.toLowerCase().includes(q) ||
+      s.triggers.some(t => t.toLowerCase().includes(q)) ||
+      (s.meta?.tags ?? []).some(t => t.toLowerCase().includes(q)),
+  )
+}
+
+// ── 启停 / 安装 / 卸载 ─────────────────────────
+
+/** 切换 skill 启用状态，返回切换后的状态 */
+export function toggleSkill(id: string, enabled?: boolean): SkillWithState | null {
+  const skill = getSkillById(id)
+  if (!skill) {
+    log.warn(`[Skill] toggle 失败，skill 不存在: ${id}`)
+    return null
+  }
+  const next = enabled ?? !skill.enabled
+  upsertInstallRecord({
+    skillId: id,
+    installedAt: getInstallRecords().find(r => r.skillId === id)?.installedAt ?? new Date().toISOString(),
+    source: skill.scope,
+    enabled: next,
+  })
+  log.info(`[Skill] ${id} 启用状态 → ${next}`)
+  return { ...skill, enabled: next }
+}
+
+/**
+ * 安装（落地）一个 skill 到 user 目录，并写安装记录
+ * 同 id 直接覆盖（用于更新）
+ */
+export function saveUserSkill(skill: AgentSkill, source: 'user' | 'remote' = 'user'): SkillWithState {
+  ensureDirs()
+  if (!validateSkill(skill)) {
+    throw new Error('Skill 格式非法：缺少 id/name/description/systemPromptAddition/triggers')
+  }
+  const normalized: AgentSkill = { ...skill, scope: source }
+  const file = path.join(USER_SKILLS_DIR, `${skill.id}.json`)
+  writeJsonAtomic(file, normalized)
+  upsertInstallRecord({
+    skillId: skill.id,
+    installedAt: new Date().toISOString(),
+    source,
+    enabled: true,
+  })
+  log.info(`[Skill] 已安装 skill: ${skill.id} (${source})`)
+  return { ...normalized, installed: true, enabled: true }
+}
+
+/** 卸载用户 skill（内置 skill 不可卸载，只能停用） */
+export function deleteUserSkill(id: string): boolean {
+  const isBuiltin = BUILT_IN_SKILLS.some(s => s.id === id)
+  if (isBuiltin) {
+    log.warn(`[Skill] 内置 skill 不可卸载，仅停用: ${id}`)
+    toggleSkill(id, false)
+    return false
+  }
+  const file = path.join(USER_SKILLS_DIR, `${id}.json`)
+  try {
+    if (fs.existsSync(file)) fs.unlinkSync(file)
+  } catch (e) {
+    log.warn(`[Skill] 删除 skill 文件失败 ${id}:`, e)
+    return false
+  }
+  // 移除安装记录
+  const records = getInstallRecords().filter(r => r.skillId !== id)
+  saveInstallRecords(records)
+  log.info(`[Skill] 已卸载 skill: ${id}`)
+  return true
+}

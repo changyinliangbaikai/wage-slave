@@ -115,7 +115,9 @@ class ThinkSplitter {
  */
 export async function streamLLMWithTools(params: StreamLLMParams): Promise<StreamResult> {
   const config = getConfig()
-  const baseUrl = config.llm_api_url.replace(/\/$/, '')
+  // 优先使用 Agent 专用配置，未配置则回退到主聊天配置
+  const baseUrl = (config.agent_llm_api_url || config.llm_api_url).replace(/\/$/, '')
+  const model = config.agent_llm_model || config.llm_model
 
   if (!params.apiKey) {
     throw new Error('未配置 API Key，请先在「设置」中填写')
@@ -129,7 +131,7 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
   const toolBuffer = new Map<number, { id: string; name: string; arguments: string }>()
 
   const body = {
-    model: config.llm_model,
+    model,
     messages: params.messages,
     tools: params.tools,
     tool_choice: 'auto',

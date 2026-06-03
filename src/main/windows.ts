@@ -34,6 +34,7 @@ let logWindow: BrowserWindow | null = null
 let toolWindow: BrowserWindow | null = null
 let aiChatWindow: BrowserWindow | null = null
 let agentChatWindow: BrowserWindow | null = null
+let skillsWindow: BrowserWindow | null = null
 
 const isDev = !app.isPackaged
 
@@ -378,4 +379,42 @@ export function openAgentChatWindow(): void {
 
 export function getAgentChatWindow(): BrowserWindow | null {
   return agentChatWindow
+}
+
+// ── Agent 技能管理窗口 ─────────────────────────
+/**
+ * 打开（或复用）技能管理窗口，独立路由 #/skills
+ * 用于浏览/启停/安装内置与市场技能
+ */
+export function openSkillsWindow(): void {
+  if (skillsWindow && !skillsWindow.isDestroyed()) {
+    if (skillsWindow.isMinimized()) skillsWindow.restore()
+    skillsWindow.show()
+    skillsWindow.focus()
+    return
+  }
+
+  skillsWindow = new BrowserWindow({
+    width: 820,
+    height: 680,
+    minWidth: 560,
+    minHeight: 480,
+    title: '小小牛马 · 技能中心',
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  skillsWindow.loadURL(getRendererURL('/skills'))
+
+  skillsWindow.on('closed', () => {
+    skillsWindow = null
+  })
+}
+
+export function getSkillsWindow(): BrowserWindow | null {
+  return skillsWindow
 }

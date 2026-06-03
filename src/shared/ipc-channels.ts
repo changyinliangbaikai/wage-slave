@@ -52,9 +52,15 @@ export const IPC = {
   SCHEDULER_DELETE_TASK:  'renderer:scheduler-delete-task',   // 删除任务
   SCHEDULER_TOGGLE_TASK:  'renderer:scheduler-toggle-task',   // 启用/禁用任务
   SCHEDULER_RUN_TASK:     'renderer:scheduler-run-task',      // 手动执行任务
+  SCHEDULER_STOP_TASK:    'renderer:scheduler-stop-task',     // 中止指定执行（Agent / shell）
+  SCHEDULER_RUNNING:      'renderer:scheduler-running',       // 获取所有正在运行的执行 ID
+  SCHEDULER_PARSE_NL:     'renderer:scheduler-parse-nl',      // 自然语言 → ScheduledTask（LLM 解析）
   SCHEDULER_GET_LOGS:     'renderer:scheduler-get-logs',      // 获取任务执行日志
   SCHEDULER_CLEAR_LOGS:   'renderer:scheduler-clear-logs',    // 清除任务执行日志
   SCHEDULER_SELECT_DIR:   'renderer:scheduler-select-dir',    // 选择工作目录
+  // main → renderer
+  SCHEDULER_TASK_UPDATE:  'main:scheduler-task-update',       // 任务执行状态变化，通知 UI 刷新
+  SCHEDULER_TASKS_CHANGED: 'main:scheduler-tasks-changed',    // 任务列表 CRUD 变化（创建/更新/删除/启停），通知 UI 重载
 
   // AI 快速对话
   AI_CHAT_START:       'renderer:ai-chat-start',       // 发起一次流式对话请求
@@ -132,6 +138,30 @@ export const IPC = {
   AGENT_TOOL_EXECUTING: 'main:agent-tool-executing',     // 单个工具开始执行
   AGENT_TOOL_EXECUTED:  'main:agent-tool-executed',      // 单个工具执行结束
   AGENT_NOTIFICATION:   'main:agent-notification',       // Agent 工具触发的桌面/小猫通知
+  AGENT_ACTIVE_CHANGED: 'main:agent-active-changed',     // Agent 全局活跃数变化（0↔>0），用于驱动小猫 busy 动画
+
+  // ── Agent Skill 系统（Phase 2） ───────────────
+  // renderer → main
+  SKILL_LIST:            'renderer:skill-list',            // 列出全部 skill（含安装/启用状态）
+  SKILL_GET:             'renderer:skill-get',             // 按 id 获取单个 skill
+  SKILL_SEARCH:          'renderer:skill-search',          // 关键词搜索 skill
+  SKILL_TOGGLE:          'renderer:skill-toggle',          // 启用/停用 skill
+  SKILL_INSTALL_FILE:    'renderer:skill-install-file',    // 选本地 skill.json 安装
+  SKILL_INSTALL_URL:     'renderer:skill-install-url',     // 从远程 URL 安装
+  SKILL_INSTALL_MARKET:  'renderer:skill-install-market',  // 从市场一键安装
+  SKILL_UNINSTALL:       'renderer:skill-uninstall',       // 卸载用户 skill（内置只停用）
+  SKILL_MARKET_LIST:     'renderer:skill-market-list',     // 拉取市场 skill 列表
+  SKILL_OPEN_WINDOW:     'renderer:skill-open-window',     // 打开技能管理窗口
+  // main → renderer
+  SKILL_CHANGED:         'main:skill-changed',             // skill 列表/状态变化，通知 UI 刷新
+
+  // ── Agent 工具权限（D.1） ───────────────────────
+  // renderer → main
+  AGENT_GET_TOOL_GROUPS: 'renderer:agent-get-tool-groups', // 获取工具分组元数据（用于设置页渲染）
+
+  // ── Agent 安全策略（D.3） ───────────────────────
+  // renderer → main
+  AGENT_GET_SECURITY_POLICY: 'renderer:agent-get-security-policy', // 获取安全策略（路径白名单 + 命令黑名单）
 } as const
 
 export type IPCChannel = typeof IPC[keyof typeof IPC]

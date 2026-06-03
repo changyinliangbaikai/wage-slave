@@ -3,8 +3,8 @@
  * 在独立窗口中打开
  */
 
-import { useState, useEffect, useLayoutEffect } from 'react'
-import type { AppConfig } from '@shared/types'
+import { useState, useEffect, useLayoutEffect, useRef } from 'react'
+import type { AppConfig, AgentToolGroupMeta, AgentSecurityPolicy } from '@shared/types'
 import { IPC } from '@shared/ipc-channels'
 import PetAppearance from '../components/PetAppearance'
 import './Settings.css'
@@ -17,6 +17,8 @@ export default function Settings() {
   const [apiKey, setApiKey] = useState('')
   const [testResult, setTestResult] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [toolGroups, setToolGroups] = useState<AgentToolGroupMeta[]>([])
+  const [securityPolicy, setSecurityPolicy] = useState<AgentSecurityPolicy | null>(null)
 
   // 设置页面在独立窗口中打开，覆盖 App.css 的 body overflow:hidden
   useLayoutEffect(() => {
@@ -28,6 +30,8 @@ export default function Settings() {
   useEffect(() => {
     api.invoke('renderer:config-get').then((c: AppConfig) => setConfig(c))
     api.invoke('renderer:apikey-get').then((k: string) => setApiKey(k ?? ''))
+    api.invoke(IPC.AGENT_GET_TOOL_GROUPS).then((groups: AgentToolGroupMeta[]) => setToolGroups(groups))
+    api.invoke(IPC.AGENT_GET_SECURITY_POLICY).then((policy: AgentSecurityPolicy) => setSecurityPolicy(policy))
   }, [])
 
   if (!config) return <div className="settings-loading">加载中...</div>
@@ -167,6 +171,31 @@ export default function Settings() {
       </section>
 
       <section className="settings-section">
+        <h2>Agent 专用模型（可选）</h2>
+        <p style={{ fontSize: 12, color: '#8a7e5e', marginBottom: 12 }}>
+          如果不填写，Agent 会使用上方主聊天的模型配置。可以为 Agent 配置更强大的模型（如 GPT-4.1）或更便宜的模型（如 GPT-4o-mini）。
+        </p>
+        <div className="field-row">
+          <label>API 地址</label>
+          <input
+            type="text"
+            value={config.agent_llm_api_url ?? ''}
+            onChange={e => update({ agent_llm_api_url: e.target.value })}
+            placeholder="留空则使用主聊天配置"
+          />
+        </div>
+        <div className="field-row">
+          <label>模型名称</label>
+          <input
+            type="text"
+            value={config.agent_llm_model ?? ''}
+            onChange={e => update({ agent_llm_model: e.target.value })}
+            placeholder="留空则使用主聊天配置"
+          />
+        </div>
+      </section>
+
+      <section className="settings-section">
         <h2>AI 对话</h2>
         <div className="field-row">
           <label>唤出快捷键</label>
@@ -262,6 +291,109 @@ export default function Settings() {
       </section>
 
       <PetAppearance />
+
+      <section className="settings-section">
+        <h2>Agent 工具权限</h2>
+        <p style={{ fontSize: 12, color: '#8a7e5e', marginBottom: 12 }}>
+          关闭某个工具组后，Agent 在本轮会话中无法调用该组工具。LLM 会尝试用其他方式完成任务。
+        </p>
+        {toolGroups.map(group => {
+          const allDisabled = group.toolNames.every(name => config.agent_disabled_tools?.includes(name))
+          const allEnabled = group.toolNames.every(name => !config.agent_disabled_tools?.includes(name))
+          const someDisabled = group.toolNames.some(name => config.agent_disabled_tools?.includes(name))
+          const disabled = config.agent_disabled_tools ?? []
+          const checkboxRef = useRef<HTMLInputElement>(null)
+
+          // 用 ref 设置 indeterminate（React 不支持直接传 indeterminate 属性）
+          useEffect(() => {
+            if (checkboxRef.current) {
+              checkboxRef.current.indeterminate = someDisabled && !allDisabled
+            }
+          }, [someDisabled, allDisabled])
+
+          const toggleGroup = (enable: boolean) => {
+            const newDisabled = new Set(disabled)
+            if (enable) {
+              group.toolNames.forEach(name => newDisabled.delete(name))
+            } else {
+              group.toolNames.forEach(name => newDisabled.add(name))
+            }
+            update({ agent_disabled_tools: Array.from(newDisabled) })
+          }
+
+          return (
+            <div key={group.id} className="field-row" style={{ alignItems: 'flex-start' }}>
+              <label style={{ paddingTop: 4 }}>
+                {group.label}
+                {group.dangerous && <span style={{ color: '#e67e22', marginLeft: 4 }}>⚠️</span>}
+              </label>
+              <div style={{ flex: 1, maxWidth: 240, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ fontSize: 11, color: '#8a7e5e', lineHeight: 1.4 }}>
+                  {group.description}
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <label style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input
+                      ref={checkboxRef}
+                      type="checkbox"
+                      checked={allEnabled}
+                      onChange={e => toggleGroup(e.target.checked)}
+                    />
+                    {allEnabled ? '已启用' : (allDisabled ? '已禁用' : '部分禁用')}
+                  </label>
+                </div>
+                {someDisabled && !allDisabled && (
+                  <div style={{ fontSize: 10, color: '#8a7e5e' }}>
+                    已禁用：{group.toolNames.filter(n => disabled.includes(n)).join(', ')}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </section>
+
+      <section className="settings-section">
+        <h2>Agent 安全策略</h2>
+        <p style={{ fontSize: 12, color: '#8a7e5e', marginBottom: 12 }}>
+          以下安全策略由应用内置，暂不支持用户修改。如需调整，请提交 Issue 或自行修改源码。
+        </p>
+        {securityPolicy && (
+          <>
+            <div className="field-row" style={{ alignItems: 'flex-start' }}>
+              <label style={{ paddingTop: 4 }}>路径白名单</label>
+              <div style={{ flex: 1, maxWidth: 240, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ fontSize: 11, color: '#8a7e5e', lineHeight: 1.4 }}>
+                  Agent 只能访问以下路径及其子目录：
+                </div>
+                <ul style={{ fontSize: 10, color: '#8a7e5e', margin: 0, paddingLeft: 16, lineHeight: 1.6 }}>
+                  {securityPolicy.allowedPaths.map(p => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className="field-row" style={{ alignItems: 'flex-start' }}>
+              <label style={{ paddingTop: 4 }}>命令黑名单</label>
+              <div style={{ flex: 1, maxWidth: 240, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ fontSize: 11, color: '#8a7e5e', lineHeight: 1.4 }}>
+                  以下命令被禁止执行：
+                </div>
+                <ul style={{ fontSize: 10, color: '#8a7e5e', margin: 0, paddingLeft: 16, lineHeight: 1.6 }}>
+                  {securityPolicy.commandBlacklist.map((rule, idx) => (
+                    <li key={idx}>
+                      <code style={{ fontSize: 9, background: '#f5f5f5', padding: '1px 3px', borderRadius: 2 }}>
+                        {rule.pattern}
+                      </code>
+                      <span style={{ marginLeft: 4 }}>— {rule.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </>
+        )}
+      </section>
 
       <section className="settings-section">
         <h2>系统</h2>

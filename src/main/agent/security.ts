@@ -121,7 +121,7 @@ function cmd(name: string): RegExp {
 
 interface DangerousRule { pattern: RegExp; reason: string }
 
-const DANGEROUS_RULES: ReadonlyArray<DangerousRule> = [
+export const DANGEROUS_RULES: ReadonlyArray<DangerousRule> = [
   // ── 文件/目录删除（强制改用专用工具或 LLM 自己拼读+写+删的组合）
   { pattern: cmd('rm'),    reason: '禁止 rm。删除请改用文件操作工具或先读再删的组合' },
   { pattern: cmd('rmdir'), reason: '禁止 rmdir。删除目录请明确告知用户，由用户手动执行' },
@@ -150,6 +150,17 @@ const DANGEROUS_RULES: ReadonlyArray<DangerousRule> = [
   { pattern: cmd('kill'),    reason: '禁止 kill 终止进程' },
   { pattern: cmd('killall'), reason: '禁止 killall' },
   { pattern: cmd('pkill'),   reason: '禁止 pkill' },
+
+  // ── 系统级定时调度（必须改用应用内 scheduler_* 工具，避免污染用户 crontab）
+  { pattern: cmd('crontab'),   reason: '禁止 crontab。请使用 scheduler_create_task 工具在小牛马应用内创建定时任务' },
+  { pattern: cmd('launchctl'), reason: '禁止 launchctl。请使用 scheduler_create_task 工具在小牛马应用内创建定时任务' },
+  { pattern: cmd('launchd'),   reason: '禁止 launchd。请使用 scheduler_create_task 工具在小牛马应用内创建定时任务' },
+  { pattern: cmd('schtasks'),  reason: '禁止 schtasks。请使用 scheduler_create_task 工具在小牛马应用内创建定时任务' },
+  // at 命令边界匹配收紧：后接时间关键字或 -选项 / -f / 数字才算调用
+  { pattern: /(?:^|[\s;&|`(])at\s+(?:\d|now|noon|midnight|teatime|tomorrow|-)/i, reason: '禁止 at 命令。请使用 scheduler_create_task 工具在小牛马应用内创建定时任务' },
+  { pattern: cmd('atq'),       reason: '禁止 atq' },
+  { pattern: cmd('atrm'),      reason: '禁止 atrm' },
+  { pattern: cmd('systemd-run'), reason: '禁止 systemd-run。请使用 scheduler_create_task 工具' },
 
   // ── 系统电源 / 关机
   { pattern: cmd('shutdown'), reason: '禁止关机' },

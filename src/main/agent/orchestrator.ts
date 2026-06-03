@@ -30,6 +30,8 @@ import { getActiveToolSchemas, getToolDescription } from './tool-registry'
 import { executeTool } from './tool-executor'
 import { streamLLMWithTools } from './llm-tool-client'
 import { saveAgentSession } from './session-store'
+import { matchSkill, buildSkillPromptAddition } from './skills/matcher'
+import { compressHistoryForLLM } from './context-compressor'
 
 /** 编排器最大迭代轮次，防止 LLM 反复调用工具死循环 */
 const MAX_ITERATIONS = 20
@@ -104,6 +106,13 @@ export class AgentOrchestrator {
     }
     this.history.push(userMsg)
 
+    // ── 技能匹配：基于用户输入命中一个已启用 skill，整轮注入其引导 ──
+    const matched = matchSkill(opts.userInput)
+    const skillAddition = matched ? buildSkillPromptAddition(matched.skill) : undefined
+    if (matched) {
+      log.info(`[Agent] sessionId=${this.sessionId} 激活技能: ${matched.skill.name}`)
+    }
+
     let finalContent = ''
 
     try {
@@ -113,12 +122,14 @@ export class AgentOrchestrator {
         this.stats.iterations++
         log.info(`[Agent] 第 ${this.stats.iterations} 轮 sessionId=${this.sessionId}`)
 
-        // 每轮都重新构建 system prompt（注入最新时间/待办状态）
-        const systemPrompt = buildSystemPrompt(buildAgentContext())
+        // 每轮都重新构建 system prompt（注入最新时间/待办状态 + 命中的技能引导）
+        const systemPrompt = buildSystemPrompt(buildAgentContext(), skillAddition)
         const tools = getActiveToolSchemas()
+        // 压缩历史：仅本轮 LLM 调用使用，this.history 保持完整以便会话持久化
+        const compressedHistory = compressHistoryForLLM(this.history)
         const apiMessages = [
           { role: 'system' as const, content: systemPrompt },
-          ...this.history.map(m => historyToApi(m)),
+          ...compressedHistory.map(m => historyToApi(m)),
         ]
 
         // ── 调用 LLM（流式） ──
@@ -219,11 +230,15 @@ export class AgentOrchestrator {
       this.stats.totalDurationMs = Date.now() - overallStart
       this.persistSession(finalContent)
 
+      // 判断是否因中断而跳出循环（result.aborted=true 会走到这里，不是 catch）
+      const wasAborted = this.abortController?.signal.aborted === true
+      if (wasAborted) log.info(`[Agent] 任务在中断后收尾 sessionId=${this.sessionId}`)
       opts.callbacks.onDone({
         sessionId: this.sessionId,
         content: finalContent,
         iterations: this.stats.iterations,
         stats: { ...this.stats },
+        aborted: wasAborted,
       })
     } catch (e: unknown) {
       // 用户主动中断：当作"已完成"处理（保留已经产生的部分）
@@ -235,6 +250,7 @@ export class AgentOrchestrator {
           content: finalContent || '(用户中断)',
           iterations: this.stats.iterations,
           stats: { ...this.stats },
+          aborted: true,
         })
       } else {
         const msg = e instanceof Error ? e.message : String(e)

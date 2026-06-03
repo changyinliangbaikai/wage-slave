@@ -26,6 +26,7 @@ import {
   deleteAgentSession,
   type UIAgentMessage,
 } from '../hooks/useAgent'
+import { openSkills } from '../hooks/useIPC'
 import type { AgentSessionMeta } from '@shared/types'
 import { ToolCallCard } from './agent/ToolCallCard'
 import { AgentInput } from './agent/AgentInput'
@@ -97,6 +98,9 @@ export default function AgentChat() {
           </button>
           <button type="button" className="agent-chat__btn" onClick={() => setShowSessions(true)}>
             历史
+          </button>
+          <button type="button" className="agent-chat__btn" onClick={openSkills} title="打开技能中心">
+            🧩 技能
           </button>
         </div>
       </header>

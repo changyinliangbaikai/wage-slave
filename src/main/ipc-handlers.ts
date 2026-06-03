@@ -14,11 +14,12 @@ import {
   getTodos, saveTodos,
   getLogsInRange, todayStr,
 } from './store'
-import { openSettingsWindow, showMainWindow, openLogWindow, openToolWindow, openAIChatWindow, getAIChatWindow, openAgentChatWindow, getAgentChatWindow } from './windows'
+import { openSettingsWindow, showMainWindow, openLogWindow, openToolWindow, openAIChatWindow, getAIChatWindow, openAgentChatWindow, getAgentChatWindow, openSkillsWindow, getSkillsWindow } from './windows'
 import { snoozeBreak, resetContinuousTime } from './activity-monitor'
 import { parsePlan, generateSummary } from './llm-service'
 import { startChat as startAIChat, abortChat as abortAIChat } from './ai-chat-service'
 import { AgentOrchestrator } from './agent/orchestrator'
+import { agentActivityStarted, agentActivityEnded } from './agent/active-tracker'
 import {
   listAgentSessions,
   getAgentSession,
@@ -27,6 +28,15 @@ import {
   renameAgentSession,
   genAgentSessionId,
 } from './agent/session-store'
+import {
+  getAllSkills,
+  getSkillById,
+  searchSkills,
+  toggleSkill,
+  deleteUserSkill,
+} from './agent/skills/store'
+import { installFromFile, installFromUrl, installSkillObject } from './agent/skills/installer'
+import { fetchMarketSkills, getMarketSkill } from './agent/skills/market'
 import {
   listSessions as listChatSessions,
   getSession as getChatSession,
@@ -385,6 +395,36 @@ export function registerIPCHandlers(): void {
     }
   })
 
+  // 中止单个执行（Agent / shell 通用）
+  ipcMain.handle(IPC.SCHEDULER_STOP_TASK, async (_e, executionId: string) => {
+    const { stopRunningTask } = await import('./tools/task-scheduler')
+    const ok = stopRunningTask(executionId)
+    return { ok }
+  })
+
+  // 查询当前正在运行的执行列表
+  ipcMain.handle(IPC.SCHEDULER_RUNNING, async () => {
+    const { listRunningExecutions } = await import('./tools/task-scheduler')
+    return listRunningExecutions()
+  })
+
+  // 自然语言 → ScheduledTask（依赖已配置的 LLM API Key）
+  ipcMain.handle(IPC.SCHEDULER_PARSE_NL, async (_e, naturalText: string) => {
+    try {
+      if (!naturalText || typeof naturalText !== 'string') {
+        return { ok: false, error: '输入文本为空' }
+      }
+      const { parseNaturalLanguageToTask } = await import('./tools/task-nl-parser')
+      const task = await parseNaturalLanguageToTask(naturalText.trim())
+      console.log('[IPC] 自然语言解析任务成功:', task.name, task.kind ?? 'shell')
+      return { ok: true, task }
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error('[IPC] 自然语言解析失败:', msg)
+      return { ok: false, error: msg }
+    }
+  })
+
   ipcMain.handle(IPC.SCHEDULER_GET_LOGS, async (_e, taskId: string) => {
     const { getTaskLogs } = await import('./tools/task-scheduler')
     return getTaskLogs(taskId)
@@ -407,6 +447,9 @@ export function registerIPCHandlers(): void {
 
   // ── Agent 模式（Phase 1） ─────────────────────
   registerAgentIPC()
+
+  // ── Agent Skill 系统（Phase 2） ───────────────
+  registerSkillIPC()
 }
 
 /**
@@ -462,6 +505,8 @@ function registerAgentIPC(): void {
       if (session) history = session.messages
     }
 
+    // 标记 Agent 进入活跃态（小猫切 busy 动画的源头）
+    agentActivityStarted('chat')
     // fire-and-forget 异步执行；事件通过回调推给 UI
     agent.run({
       userInput,
@@ -489,6 +534,9 @@ function registerAgentIPC(): void {
         fatal: true,
       })
       activeAgents.delete(sessionId)
+    }).finally(() => {
+      // 无论成功/失败/中断，都要把活跃计数减回去，触发小猫回 idle
+      agentActivityEnded('chat')
     })
 
     return { ok: true, sessionId }
@@ -516,4 +564,121 @@ function registerAgentIPC(): void {
   })
   // SAVE_SESSION 暂时主要由 Orchestrator 内部完成；前端如需手动保存（标题等）也可用此通道
   ipcMain.handle(IPC.AGENT_SAVE_SESSION, (_e, session: AgentSession) => saveAgentSession(session))
+}
+
+/**
+ * 注册 Skill 相关 IPC（Phase 2）
+ * 覆盖：列表/查询/搜索/启停/安装(本地·URL·市场)/卸载/市场列表/打开窗口
+ */
+function registerSkillIPC(): void {
+  // skill 状态变化后通知技能窗口刷新
+  const notifyChanged = (): void => {
+    const win = getSkillsWindow()
+    if (win && !win.isDestroyed()) win.webContents.send(IPC.SKILL_CHANGED)
+  }
+
+  // 打开技能管理窗口
+  ipcMain.on(IPC.SKILL_OPEN_WINDOW, () => openSkillsWindow())
+
+  // ── Agent 工具权限（D.1） ───────────────────────
+  ipcMain.handle(IPC.AGENT_GET_TOOL_GROUPS, () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { AGENT_TOOL_GROUPS } = require('./agent/tool-registry') as typeof import('./agent/tool-registry')
+    return AGENT_TOOL_GROUPS
+  })
+
+  // ── Agent 安全策略（D.3） ───────────────────────
+  ipcMain.handle(IPC.AGENT_GET_SECURITY_POLICY, () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getAllowedPaths, DANGEROUS_RULES } = require('./agent/security') as typeof import('./agent/security')
+    const allowedPaths = getAllowedPaths()
+    // 提取命令黑名单的正则描述（转换为字符串用于展示）
+    const commandBlacklist = DANGEROUS_RULES.map((rule: { pattern: RegExp; reason: string }) => ({
+      pattern: rule.pattern.toString(),
+      reason: rule.reason,
+    }))
+    return { allowedPaths, commandBlacklist }
+  })
+
+  // 查询类
+  ipcMain.handle(IPC.SKILL_LIST, () => getAllSkills())
+  ipcMain.handle(IPC.SKILL_GET, (_e, id: string) => getSkillById(id))
+  ipcMain.handle(IPC.SKILL_SEARCH, (_e, query: string) => searchSkills(query))
+
+  // 启停
+  ipcMain.handle(IPC.SKILL_TOGGLE, (_e, params: { id: string; enabled?: boolean }) => {
+    const result = toggleSkill(params.id, params.enabled)
+    notifyChanged()
+    return result
+  })
+
+  // 从本地文件安装（弹系统文件选择框）
+  ipcMain.handle(IPC.SKILL_INSTALL_FILE, async () => {
+    const result = await dialog.showOpenDialog({
+      title: '选择 skill.json',
+      properties: ['openFile'],
+      filters: [{ name: 'Skill', extensions: ['json'] }],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { ok: false, canceled: true }
+    }
+    try {
+      const skill = installFromFile(result.filePaths[0])
+      notifyChanged()
+      log.info('[IPC] 已安装本地 skill:', skill.id)
+      return { ok: true, skill }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      log.warn('[IPC] 安装本地 skill 失败:', msg)
+      return { ok: false, error: msg }
+    }
+  })
+
+  // 从远程 URL 安装
+  ipcMain.handle(IPC.SKILL_INSTALL_URL, async (_e, url: string) => {
+    try {
+      const skill = await installFromUrl(url)
+      notifyChanged()
+      log.info('[IPC] 已从 URL 安装 skill:', skill.id)
+      return { ok: true, skill }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      log.warn('[IPC] URL 安装 skill 失败:', msg)
+      return { ok: false, error: msg }
+    }
+  })
+
+  // 从市场一键安装
+  ipcMain.handle(IPC.SKILL_INSTALL_MARKET, async (_e, id: string) => {
+    try {
+      const item = await getMarketSkill(id)
+      if (!item) return { ok: false, error: '市场中未找到该技能' }
+      const skill = installSkillObject(item, 'remote')
+      notifyChanged()
+      log.info('[IPC] 已从市场安装 skill:', id)
+      return { ok: true, skill }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      log.warn('[IPC] 市场安装 skill 失败:', msg)
+      return { ok: false, error: msg }
+    }
+  })
+
+  // 卸载（内置只停用）
+  ipcMain.handle(IPC.SKILL_UNINSTALL, (_e, id: string) => {
+    const ok = deleteUserSkill(id)
+    notifyChanged()
+    return { ok }
+  })
+
+  // 拉取市场列表（远程不可用时回退本地精选）
+  ipcMain.handle(IPC.SKILL_MARKET_LIST, async () => {
+    try {
+      const skills = await fetchMarketSkills()
+      return { ok: true, skills }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return { ok: false, error: msg, skills: [] }
+    }
+  })
 }
