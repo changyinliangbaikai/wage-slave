@@ -1,0 +1,354 @@
+/**
+ * Agent 编排器
+ *
+ * 多轮循环：
+ *  1. 构建 System Prompt + History → 流式调用 LLM
+ *  2. LLM 返回 tool_calls → 并发执行工具 → 把结果回灌 history → 进入下一轮
+ *  3. LLM 返回纯文本（finish_reason=stop）→ 结束并把累计内容写入会话
+ *
+ * 关键约束：
+ *  - maxIterations 防止死循环（默认 20 轮）
+ *  - 每一轮都重建 AgentContext（保持时间/待办/日志状态最新）
+ *  - 工具结果通过 IPC 实时推送给 UI（边执行边显示）
+ */
+
+import log from 'electron-log/main'
+import type {
+  AgentMessage,
+  AgentSession,
+  AgentToolCall,
+  AgentToolResult,
+  AgentChunkPayload,
+  AgentDonePayload,
+  AgentErrorPayload,
+  AgentToolStartPayload,
+  AgentToolExecutingPayload,
+  AgentToolExecutedPayload,
+} from '@shared/types'
+import { buildSystemPrompt, buildAgentContext } from './system-prompt'
+import { getActiveToolSchemas, getToolDescription } from './tool-registry'
+import { executeTool } from './tool-executor'
+import { streamLLMWithTools } from './llm-tool-client'
+import { saveAgentSession } from './session-store'
+
+/** 编排器最大迭代轮次，防止 LLM 反复调用工具死循环 */
+const MAX_ITERATIONS = 20
+
+/** Agent 流式回调集合 */
+export interface AgentCallbacks {
+  onChunk: (payload: AgentChunkPayload) => void
+  onDone: (payload: AgentDonePayload) => void
+  onError: (payload: AgentErrorPayload) => void
+  onToolStart: (payload: AgentToolStartPayload) => void
+  onToolExecuting: (payload: AgentToolExecutingPayload) => void
+  onToolExecuted: (payload: AgentToolExecutedPayload) => void
+}
+
+export interface AgentRunOptions {
+  /** 用户输入 */
+  userInput: string
+  /** API Key（外部传入，避免每轮再异步读 keytar） */
+  apiKey: string
+  /** 历史消息（不含本轮 user） */
+  history: AgentMessage[]
+  /** 流式回调 */
+  callbacks: AgentCallbacks
+}
+
+/**
+ * Agent 编排器
+ * 一个实例对应一次"用户提交 → Agent 完成或被中止"的执行周期
+ */
+export class AgentOrchestrator {
+  private readonly sessionId: string
+  /** 当前累计的全部消息（含 system 之外的所有轮次） */
+  private history: AgentMessage[] = []
+  /** 用户主动中断器 */
+  private abortController: AbortController | null = null
+  /** 是否处于运行状态 */
+  private running = false
+  /** 累计统计 */
+  private stats = { iterations: 0, toolCalls: 0, totalDurationMs: 0 }
+
+  constructor(sessionId: string) {
+    this.sessionId = sessionId
+  }
+
+  isRunning(): boolean {
+    return this.running
+  }
+
+  abort(): void {
+    if (this.abortController && !this.abortController.signal.aborted) {
+      log.info(`[Agent] 用户主动中断 sessionId=${this.sessionId}`)
+      this.abortController.abort()
+    }
+  }
+
+  /** 执行一次任务 */
+  async run(opts: AgentRunOptions): Promise<void> {
+    if (this.running) throw new Error('Agent 正在运行，请先停止')
+
+    this.running = true
+    this.abortController = new AbortController()
+    this.history = [...opts.history]
+    this.stats = { iterations: 0, toolCalls: 0, totalDurationMs: 0 }
+    const overallStart = Date.now()
+
+    // ── 把用户输入加入 history ──
+    const userMsg: AgentMessage = {
+      id: genMsgId('user'),
+      role: 'user',
+      content: opts.userInput,
+      createdAt: Date.now(),
+    }
+    this.history.push(userMsg)
+
+    let finalContent = ''
+
+    try {
+      while (this.stats.iterations < MAX_ITERATIONS) {
+        if (this.abortController.signal.aborted) break
+
+        this.stats.iterations++
+        log.info(`[Agent] 第 ${this.stats.iterations} 轮 sessionId=${this.sessionId}`)
+
+        // 每轮都重新构建 system prompt（注入最新时间/待办状态）
+        const systemPrompt = buildSystemPrompt(buildAgentContext())
+        const tools = getActiveToolSchemas()
+        const apiMessages = [
+          { role: 'system' as const, content: systemPrompt },
+          ...this.history.map(m => historyToApi(m)),
+        ]
+
+        // ── 调用 LLM（流式） ──
+        const result = await streamLLMWithTools({
+          messages: apiMessages,
+          tools,
+          apiKey: opts.apiKey,
+          signal: this.abortController.signal,
+          onDelta: ({ content, reasoning }) => {
+            opts.callbacks.onChunk({
+              sessionId: this.sessionId,
+              content,
+              reasoning,
+              iteration: this.stats.iterations,
+            })
+          },
+        })
+
+        if (result.aborted) break
+
+        // ── 把 assistant 这一轮的产出写入 history ──
+        const assistantMsg: AgentMessage = {
+          id: genMsgId('asst'),
+          role: 'assistant',
+          content: result.content,
+          reasoning: result.reasoning || undefined,
+          tool_calls: result.toolCalls.length > 0
+            ? result.toolCalls.map(tc => ({
+                id: tc.id,
+                name: tc.name,
+                arguments: JSON.stringify(tc.arguments),
+              }))
+            : undefined,
+          createdAt: Date.now(),
+        }
+        this.history.push(assistantMsg)
+
+        // ── 没有工具调用 → 任务完成 ──
+        if (result.toolCalls.length === 0) {
+          finalContent = result.content
+          break
+        }
+
+        // ── 有工具调用 → 推送 → 执行 → 回灌 history ──
+        opts.callbacks.onToolStart({
+          sessionId: this.sessionId,
+          iteration: this.stats.iterations,
+          toolCalls: result.toolCalls.map(tc => ({
+            id: tc.id,
+            name: tc.name,
+            description: getToolDescription(tc.name),
+            arguments: tc.arguments,
+          })),
+        })
+
+        const toolResults = await this.executeAllTools(result.toolCalls, opts.callbacks)
+        this.stats.toolCalls += toolResults.length
+
+        // 把 tool 结果作为 role=tool 消息追加
+        for (const tr of toolResults) {
+          this.history.push({
+            id: genMsgId('tool'),
+            role: 'tool',
+            content: tr.error ? `[ERROR] ${tr.error}` : tr.output,
+            tool_call_id: tr.toolCallId,
+            tool_name: tr.toolName,
+            createdAt: Date.now(),
+          })
+        }
+
+        // 任一 fatal 错误 → 中止
+        const fatal = toolResults.find(t => t.fatal)
+        if (fatal) {
+          opts.callbacks.onError({
+            sessionId: this.sessionId,
+            error: `工具 ${fatal.toolName} 致命错误: ${fatal.error}`,
+            fatal: true,
+          })
+          finalContent = `❌ 执行中止：工具 ${fatal.toolName} 报告致命错误`
+          break
+        }
+
+        // 否则进入下一轮迭代
+      }
+
+      // ── 兜底：达到最大轮次 ──
+      if (this.stats.iterations >= MAX_ITERATIONS && !finalContent) {
+        finalContent = `⚠️ 已达最大迭代轮次（${MAX_ITERATIONS}），任务未在限定步数内完成。`
+        this.history.push({
+          id: genMsgId('asst'),
+          role: 'assistant',
+          content: finalContent,
+          createdAt: Date.now(),
+        })
+      }
+
+      // ── 收尾：写持久化 + done 事件 ──
+      this.stats.totalDurationMs = Date.now() - overallStart
+      this.persistSession(finalContent)
+
+      opts.callbacks.onDone({
+        sessionId: this.sessionId,
+        content: finalContent,
+        iterations: this.stats.iterations,
+        stats: { ...this.stats },
+      })
+    } catch (e: unknown) {
+      // 用户主动中断：当作"已完成"处理（保留已经产生的部分）
+      if (isAbortError(e) || this.abortController.signal.aborted) {
+        this.stats.totalDurationMs = Date.now() - overallStart
+        this.persistSession(finalContent || '(用户中断)')
+        opts.callbacks.onDone({
+          sessionId: this.sessionId,
+          content: finalContent || '(用户中断)',
+          iterations: this.stats.iterations,
+          stats: { ...this.stats },
+        })
+      } else {
+        const msg = e instanceof Error ? e.message : String(e)
+        log.error(`[Agent] 执行异常 sessionId=${this.sessionId}:`, msg)
+        opts.callbacks.onError({
+          sessionId: this.sessionId,
+          error: msg,
+          fatal: true,
+        })
+      }
+    } finally {
+      this.running = false
+      this.abortController = null
+    }
+  }
+
+  /**
+   * 执行一组工具调用（顺序执行，避免对本地数据并发写竞争）
+   * 每一步都通过 IPC 推送，让 UI 实时看到进度
+   */
+  private async executeAllTools(
+    toolCalls: AgentToolCall[],
+    cb: AgentCallbacks,
+  ): Promise<AgentToolResult[]> {
+    const results: AgentToolResult[] = []
+    for (const tc of toolCalls) {
+      cb.onToolExecuting({
+        sessionId: this.sessionId,
+        toolId: tc.id,
+        toolName: tc.name,
+      })
+
+      const result = await executeTool(tc)
+      results.push(result)
+
+      cb.onToolExecuted({
+        sessionId: this.sessionId,
+        toolId: tc.id,
+        toolName: tc.name,
+        success: !result.error,
+        output: result.output,
+        error: result.error,
+        durationMs: result.durationMs,
+      })
+    }
+    return results
+  }
+
+  /**
+   * 把当前 history 写入会话存储
+   * 标题由首条 user 消息生成
+   */
+  private persistSession(latestContent: string): void {
+    try {
+      const firstUser = this.history.find(m => m.role === 'user')
+      const title = (firstUser?.content ?? '新会话').slice(0, 24) || '新会话'
+      const preview = (firstUser?.content ?? '').replace(/\s+/g, ' ').slice(0, 80)
+      const now = Date.now()
+      const session: AgentSession = {
+        id: this.sessionId,
+        title,
+        createdAt: this.history[0]?.createdAt ?? now,
+        updatedAt: now,
+        messageCount: this.history.length,
+        preview,
+        messages: this.history,
+        stats: { ...this.stats },
+      }
+      saveAgentSession(session)
+      log.info(`[Agent] 持久化会话 id=${this.sessionId} msgs=${this.history.length} latestLen=${latestContent.length}`)
+    } catch (e) {
+      log.warn('[Agent] 持久化失败:', e)
+    }
+  }
+}
+
+/**
+ * 把 AgentMessage 转为 OpenAI API 消息格式
+ *  - assistant 含 tool_calls 时按 OpenAI function calling 协议序列化
+ *  - tool 角色必须带 tool_call_id
+ */
+function historyToApi(m: AgentMessage): {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string
+  tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
+  tool_call_id?: string
+  name?: string
+} {
+  if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+    return {
+      role: 'assistant',
+      content: m.content || '',
+      tool_calls: m.tool_calls.map(tc => ({
+        id: tc.id,
+        type: 'function' as const,
+        function: { name: tc.name, arguments: tc.arguments },
+      })),
+    }
+  }
+  if (m.role === 'tool') {
+    return {
+      role: 'tool',
+      content: m.content,
+      tool_call_id: m.tool_call_id ?? '',
+      name: m.tool_name,
+    }
+  }
+  return { role: m.role, content: m.content }
+}
+
+function genMsgId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function isAbortError(e: unknown): boolean {
+  return Boolean(e) && typeof e === 'object' && (e as { name?: string }).name === 'AbortError'
+}

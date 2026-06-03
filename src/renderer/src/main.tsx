@@ -6,6 +6,7 @@ import Settings from './pages/Settings'
 import LogViewer from './pages/LogViewer'
 import ToolsPage from './pages/ToolsPage'
 import AIChat from './pages/AIChat'
+import AgentChat from './pages/AgentChat'
 import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
 
@@ -29,6 +30,7 @@ function RootPage() {
   if (hash === '#/logs') return <LogViewer />
   if (hash === '#/tools') return <ToolsPage />
   if (hash === '#/ai-chat') return <AIChat />
+  if (hash === '#/agent') return <AgentChat />
   return <App />
 }
 

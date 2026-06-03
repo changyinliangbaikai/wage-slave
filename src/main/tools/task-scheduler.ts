@@ -340,6 +340,16 @@ function wasRunTodayAfterSchedule(task: ScheduledTask): boolean {
  */
 function wasScheduleBeforeStartup(schedule: { time?: string }): boolean {
   if (!schedulerStartTime) return false
+
+  // 仅在“启动当天”才判定为“启动前已错过”：schedulerStartTime 在整个进程生命周期内固定不变，
+  // 若缺少同日约束，一旦某次启动晚于计划时间，之后每天都会被误判为“已错过”而永久跳过。
+  const now = new Date()
+  const isStartupDay =
+    schedulerStartTime.getFullYear() === now.getFullYear() &&
+    schedulerStartTime.getMonth() === now.getMonth() &&
+    schedulerStartTime.getDate() === now.getDate()
+  if (!isStartupDay) return false
+
   const [h, m] = (schedule.time ?? '09:00').split(':').map(Number)
   const scheduledMinutes = h * 60 + m
   const startMinutes = schedulerStartTime.getHours() * 60 + schedulerStartTime.getMinutes()

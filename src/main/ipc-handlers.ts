@@ -14,10 +14,19 @@ import {
   getTodos, saveTodos,
   getLogsInRange, todayStr,
 } from './store'
-import { openSettingsWindow, showMainWindow, openLogWindow, openToolWindow, openAIChatWindow, getAIChatWindow } from './windows'
+import { openSettingsWindow, showMainWindow, openLogWindow, openToolWindow, openAIChatWindow, getAIChatWindow, openAgentChatWindow, getAgentChatWindow } from './windows'
 import { snoozeBreak, resetContinuousTime } from './activity-monitor'
 import { parsePlan, generateSummary } from './llm-service'
 import { startChat as startAIChat, abortChat as abortAIChat } from './ai-chat-service'
+import { AgentOrchestrator } from './agent/orchestrator'
+import {
+  listAgentSessions,
+  getAgentSession,
+  saveAgentSession,
+  deleteAgentSession,
+  renameAgentSession,
+  genAgentSessionId,
+} from './agent/session-store'
 import {
   listSessions as listChatSessions,
   getSession as getChatSession,
@@ -29,7 +38,10 @@ import {
 import { registerAIChatAttachmentHandlers } from './ai-chat-attachments'
 import { exportSummaryDocx } from './docx-export'
 import { getMainWindow } from './windows'
-import type { AppConfig, DailyLog, TodoItem, AIChatRequest, AIChatSession } from '@shared/types'
+import type {
+  AppConfig, DailyLog, TodoItem, AIChatRequest, AIChatSession,
+  AgentSession,
+} from '@shared/types'
 
 // ── 尝试加载 keytar（安全存储 API Key）──────────
 let keytar: typeof import('keytar') | null = null
@@ -392,4 +404,116 @@ export function registerIPCHandlers(): void {
     if (result.canceled || result.filePaths.length === 0) return ''
     return result.filePaths[0]
   })
+
+  // ── Agent 模式（Phase 1） ─────────────────────
+  registerAgentIPC()
+}
+
+/**
+ * 注册 Agent 相关 IPC
+ * 拆出独立函数避免 registerIPCHandlers 体积膨胀
+ */
+function registerAgentIPC(): void {
+  // 活跃 Agent 实例表（多会话并发）
+  const activeAgents = new Map<string, AgentOrchestrator>()
+
+  /** 取出 API Key（异步） */
+  const getApiKey = async (): Promise<string> => {
+    if (keytar) {
+      return (await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT)) ?? ''
+    }
+    return ''
+  }
+
+  /** 把推送广播给 Agent 窗口 + 调用方窗口（防止用户已关闭窗口导致 sender 失效） */
+  const broadcast = (channel: string, payload: unknown): void => {
+    const win = getAgentChatWindow()
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(channel, payload)
+    }
+  }
+
+  // 打开 Agent 对话窗口
+  ipcMain.on(IPC.AGENT_OPEN_WINDOW, () => openAgentChatWindow())
+
+  // 启动一次 Agent 任务
+  ipcMain.handle(IPC.AGENT_START, async (_e, params: { sessionId?: string; userInput: string }) => {
+    const { sessionId: providedId, userInput } = params
+    const sessionId = providedId ?? genAgentSessionId()
+
+    if (!userInput || !userInput.trim()) {
+      return { ok: false, error: '输入不能为空' }
+    }
+
+    // 如果同会话已有活跃 Agent，先中止
+    const existing = activeAgents.get(sessionId)
+    if (existing) {
+      existing.abort()
+    }
+
+    const apiKey = await getApiKey()
+    const agent = new AgentOrchestrator(sessionId)
+    activeAgents.set(sessionId, agent)
+
+    // 加载历史（继续会话场景）：仅在显式传 sessionId 时加载
+    let history: AgentSession['messages'] = []
+    if (providedId) {
+      const session = getAgentSession(providedId)
+      if (session) history = session.messages
+    }
+
+    // fire-and-forget 异步执行；事件通过回调推给 UI
+    agent.run({
+      userInput,
+      apiKey,
+      history,
+      callbacks: {
+        onChunk: (p) => broadcast(IPC.AGENT_CHUNK, p),
+        onDone: (p) => {
+          broadcast(IPC.AGENT_DONE, p)
+          activeAgents.delete(sessionId)
+        },
+        onError: (p) => {
+          broadcast(IPC.AGENT_ERROR, p)
+          if (p.fatal) activeAgents.delete(sessionId)
+        },
+        onToolStart: (p) => broadcast(IPC.AGENT_TOOL_START, p),
+        onToolExecuting: (p) => broadcast(IPC.AGENT_TOOL_EXECUTING, p),
+        onToolExecuted: (p) => broadcast(IPC.AGENT_TOOL_EXECUTED, p),
+      },
+    }).catch(err => {
+      log.error('[IPC] Agent 未捕获异常:', err)
+      broadcast(IPC.AGENT_ERROR, {
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+        fatal: true,
+      })
+      activeAgents.delete(sessionId)
+    })
+
+    return { ok: true, sessionId }
+  })
+
+  // 中止 Agent
+  ipcMain.handle(IPC.AGENT_STOP, (_e, params: { sessionId: string }) => {
+    const agent = activeAgents.get(params.sessionId)
+    if (!agent) return { ok: false, error: '无活跃 Agent' }
+    agent.abort()
+    return { ok: true }
+  })
+
+  // 查询当前是否在执行
+  ipcMain.handle(IPC.AGENT_STATUS, (_e, params: { sessionId: string }) => {
+    return { running: activeAgents.has(params.sessionId) }
+  })
+
+  // 会话管理
+  ipcMain.handle(IPC.AGENT_LIST_SESSIONS, () => listAgentSessions())
+  ipcMain.handle(IPC.AGENT_GET_SESSION, (_e, id: string) => getAgentSession(id))
+  ipcMain.handle(IPC.AGENT_DELETE_SESSION, (_e, id: string) => ({ ok: deleteAgentSession(id) }))
+  ipcMain.handle(IPC.AGENT_RENAME_SESSION, (_e, params: { id: string; title: string }) => {
+    return { ok: renameAgentSession(params.id, params.title) }
+  })
+  // SAVE_SESSION 暂时主要由 Orchestrator 内部完成；前端如需手动保存（标题等）也可用此通道
+  ipcMain.handle(IPC.AGENT_SAVE_SESSION, (_e, session: AgentSession) => saveAgentSession(session))
 }

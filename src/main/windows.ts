@@ -33,6 +33,7 @@ let settingsWindow: BrowserWindow | null = null
 let logWindow: BrowserWindow | null = null
 let toolWindow: BrowserWindow | null = null
 let aiChatWindow: BrowserWindow | null = null
+let agentChatWindow: BrowserWindow | null = null
 
 const isDev = !app.isPackaged
 
@@ -333,4 +334,48 @@ export function openAIChatWindow(): void {
 
 export function getAIChatWindow(): BrowserWindow | null {
   return aiChatWindow
+}
+
+// ── Agent 对话窗口 ─────────────────────────────
+/**
+ * 打开（或复用）Agent 对话窗口。
+ * 与 AIChat 窗口共存，独立路由 #/agent；
+ * 尺寸/位置目前用默认值，后续可参考 ai_chat_window_bounds 加上记忆能力。
+ */
+export function openAgentChatWindow(): void {
+  if (agentChatWindow && !agentChatWindow.isDestroyed()) {
+    if (agentChatWindow.isMinimized()) agentChatWindow.restore()
+    agentChatWindow.show()
+    agentChatWindow.focus()
+    return
+  }
+
+  agentChatWindow = new BrowserWindow({
+    width: 880,
+    height: 720,
+    minWidth: 600,
+    minHeight: 500,
+    title: '小小牛马 · Agent 模式',
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  agentChatWindow.loadURL(getRendererURL('/agent'))
+
+  agentChatWindow.on('closed', () => {
+    agentChatWindow = null
+  })
+
+  if (isDev) {
+    // 开发期方便排查 IPC 流式问题；如不需要可关掉
+    // agentChatWindow.webContents.openDevTools({ mode: 'detach' })
+  }
+}
+
+export function getAgentChatWindow(): BrowserWindow | null {
+  return agentChatWindow
 }

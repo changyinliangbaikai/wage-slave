@@ -392,3 +392,171 @@ export interface TaskExecution {
   /** 执行状态 */
   status: 'running' | 'success' | 'failed'
 }
+
+// ─────────────────────────────────────────────
+// Agent 模块类型
+// ─────────────────────────────────────────────
+
+/** Agent 单条消息（持久化 + IPC 共用） */
+export interface AgentMessage {
+  /** 消息 id（渲染端去重用） */
+  id: string
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  /** 文本内容（assistant 决定是否显示，tool 是工具返回值） */
+  content: string
+  /** 推理过程（仅 assistant 有，可选） */
+  reasoning?: string
+  /** assistant 在本轮发起的工具调用列表（OpenAI 兼容） */
+  tool_calls?: Array<{
+    id: string
+    name: string
+    /** JSON 字符串形式参数 */
+    arguments: string
+  }>
+  /** tool 角色专用：对应哪一次工具调用 */
+  tool_call_id?: string
+  /** tool 角色专用：工具名称（便于 UI 渲染） */
+  tool_name?: string
+  /** 创建时间（毫秒） */
+  createdAt: number
+}
+
+/** 单次工具调用（已解析 arguments） */
+export interface AgentToolCall {
+  id: string
+  name: string
+  /** 已解析后的参数对象 */
+  arguments: Record<string, unknown>
+}
+
+/** 工具执行结果 */
+export interface AgentToolResult {
+  toolCallId: string
+  toolName: string
+  /** 成功输出（字符串，方便回灌给 LLM） */
+  output: string
+  /** 失败时的错误信息 */
+  error?: string
+  /** 是否不可恢复（true 时 Orchestrator 提前中止） */
+  fatal?: boolean
+  /** 执行耗时（毫秒） */
+  durationMs: number
+}
+
+/** Agent 会话元数据（不含完整消息，列表用） */
+export interface AgentSessionMeta {
+  id: string
+  title: string
+  createdAt: number
+  updatedAt: number
+  messageCount: number
+  /** 首条用户输入预览 */
+  preview: string
+}
+
+/** Agent 完整会话 */
+export interface AgentSession extends AgentSessionMeta {
+  messages: AgentMessage[]
+  /** 累计统计 */
+  stats: {
+    iterations: number
+    toolCalls: number
+    totalDurationMs: number
+  }
+}
+
+/** Agent 上下文（注入到 System Prompt） */
+export interface AgentContext {
+  /** 当前工作目录 */
+  cwd: string
+  /** 用户主目录 */
+  homePath: string
+  /** 桌面路径 */
+  desktopPath: string
+  /** 文档路径 */
+  documentsPath: string
+  /** 下载路径 */
+  downloadsPath: string
+  /** 应用数据目录（小牛马 userData） */
+  appDataPath: string
+  /** 当前时间字符串（zh-CN 本地化） */
+  currentTime: string
+  /** 当前是星期几（中文） */
+  dayOfWeek: string
+  /** 当前操作系统 */
+  platform: NodeJS.Platform
+  /** 当前待办数量（今天） */
+  todoCount: number
+  /** 今日是否已经写日志 */
+  hasTodayLog: boolean
+}
+
+// ─── Agent IPC 推送载荷 ───────────────────────
+
+export interface AgentChunkPayload {
+  sessionId: string
+  /** 累计正式回复内容（不含 think） */
+  content: string
+  /** 累计推理内容 */
+  reasoning: string
+  /** 当前是第几轮迭代 */
+  iteration: number
+}
+
+export interface AgentDonePayload {
+  sessionId: string
+  content: string
+  iterations: number
+  /** 累计统计 */
+  stats: {
+    iterations: number
+    toolCalls: number
+    totalDurationMs: number
+  }
+}
+
+export interface AgentErrorPayload {
+  sessionId: string
+  error: string
+  /** true 表示无法恢复，前端应停止流 */
+  fatal: boolean
+}
+
+export interface AgentToolStartPayload {
+  sessionId: string
+  /** 本轮要执行的工具调用列表 */
+  toolCalls: Array<{
+    id: string
+    name: string
+    /** 简短描述（便于 UI 标签） */
+    description: string
+    /** 已解析的参数（前端展示） */
+    arguments: Record<string, unknown>
+  }>
+  /** 当前迭代轮次 */
+  iteration: number
+}
+
+export interface AgentToolExecutingPayload {
+  sessionId: string
+  toolId: string
+  toolName: string
+}
+
+export interface AgentToolExecutedPayload {
+  sessionId: string
+  toolId: string
+  toolName: string
+  success: boolean
+  output: string
+  error?: string
+  durationMs: number
+}
+
+/** 主进程对外推送的"小猫通知"（Agent 工具 show_notification 用） */
+export interface AgentNotificationPayload {
+  title: string
+  body?: string
+  /** 通知来源类型 */
+  type?: 'tool' | 'cron-result' | 'general'
+}

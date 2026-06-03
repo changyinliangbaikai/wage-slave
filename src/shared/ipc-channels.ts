@@ -111,6 +111,27 @@ export const IPC = {
   PETS_OPEN_DIR:        'renderer:pets-open-dir',       // 打开用户桌宠目录
   PETS_PICK_FILE:       'renderer:pets-pick-file',      // 打开文件对话框选 PNG（返回路径 + 尺寸）
   PETS_CHANGED:         'main:pets-changed',            // 主进程→渲染：激活包变化
+
+  // ── Agent 模式（Phase 1） ─────────────────────
+  // renderer → main
+  AGENT_START:          'renderer:agent-start',          // 启动一次 Agent 任务（流式）
+  AGENT_STOP:           'renderer:agent-stop',           // 中止当前会话的 Agent 执行
+  AGENT_STATUS:         'renderer:agent-status',         // 查询会话当前是否在执行
+  AGENT_OPEN_WINDOW:    'renderer:agent-open-window',    // 打开 Agent 对话窗口
+  // 会话持久化
+  AGENT_LIST_SESSIONS:  'renderer:agent-list-sessions',
+  AGENT_GET_SESSION:    'renderer:agent-get-session',
+  AGENT_SAVE_SESSION:   'renderer:agent-save-session',
+  AGENT_DELETE_SESSION: 'renderer:agent-delete-session',
+  AGENT_RENAME_SESSION: 'renderer:agent-rename-session',
+  // main → renderer（流式推送）
+  AGENT_CHUNK:          'main:agent-chunk',              // 累计 content / reasoning 增量
+  AGENT_DONE:           'main:agent-done',               // 会话执行完成
+  AGENT_ERROR:          'main:agent-error',              // 执行出错
+  AGENT_TOOL_START:     'main:agent-tool-start',         // 一组工具调用即将执行
+  AGENT_TOOL_EXECUTING: 'main:agent-tool-executing',     // 单个工具开始执行
+  AGENT_TOOL_EXECUTED:  'main:agent-tool-executed',      // 单个工具执行结束
+  AGENT_NOTIFICATION:   'main:agent-notification',       // Agent 工具触发的桌面/小猫通知
 } as const
 
 export type IPCChannel = typeof IPC[keyof typeof IPC]
