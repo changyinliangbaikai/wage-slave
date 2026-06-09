@@ -32,7 +32,8 @@ import {
 } from './hooks/useIPC'
 import { useCatMood } from './hooks/useCatMood'
 import { CatAnimator } from './components/PixelCat/animator'
-import type { CatState, TodoItem } from '@shared/types'
+import { IPC } from '@shared/ipc-channels'
+import type { AgentNotificationPayload, CatState, TodoItem } from '@shared/types'
 import './App.css'
 
 /** 返回本地日期字符串 YYYY-MM-DD，避免 toISOString() 的 UTC 偏差 */
@@ -77,7 +78,22 @@ export default function App() {
   const [mountAt] = useState<number>(() => Date.now())
   // StatusBubble 抢跑计数器：每次 pet/feed 递增，触发气泡立即弹一条"感谢"文案
   const [bubbleTrigger, setBubbleTrigger] = useState(0)
+  const [agentNotice, setAgentNotice] = useState<string | null>(null)
+  const agentNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const bumpBubble = useCallback(() => setBubbleTrigger(v => v + 1), [])
+
+  useOnEvent(IPC.AGENT_NOTIFICATION, useCallback((payload: AgentNotificationPayload) => {
+    if (agentNoticeTimerRef.current) clearTimeout(agentNoticeTimerRef.current)
+    const text = payload.body ? `${payload.title}：${payload.body}` : payload.title
+    setAgentNotice(text)
+    agentNoticeTimerRef.current = setTimeout(() => setAgentNotice(null), 8000)
+  }, []))
+
+  useEffect(() => {
+    return () => {
+      if (agentNoticeTimerRef.current) clearTimeout(agentNoticeTimerRef.current)
+    }
+  }, [])
 
   // ── 今日待办：用于 StatusBubble 感知数量 ──
   const [todayTodos, setTodayTodos] = useState<TodoItem[]>([])
@@ -112,15 +128,32 @@ export default function App() {
   // 只在 activeFlow === 'none' 的"空闲态"下，根据 agentActive 把 busy 加上去
   // 依赖 activeFlow（而非 activeFlowRef）：流程结束 → effect 重跑 → 若 Agent 仍在跑则切回 busy
   const [agentActive, setAgentActive] = useState(false)
+  const prevAgentActiveRef = useRef(false)
   useOnAgentActiveChanged(useCallback((p: { active: boolean; count: number }) => {
     console.log(`[App] Agent 活跃状态变化: active=${p.active} count=${p.count}`)
     setAgentActive(p.active)
   }, []))
   useEffect(() => {
+    const wasActive = prevAgentActiveRef.current
+    prevAgentActiveRef.current = agentActive
     // 流程独占小猫动画，本 effect 不干预
     if (activeFlow !== 'none') return
-    setForceCatState(agentActive ? 'busy' : undefined)
+    if (agentActive) {
+      // Agent 活跃状态来自主进程 IPC，这里同步到小猫动画覆盖态。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setForceCatState('busy')
+      return
+    }
+    setForceCatState(undefined)
+    if (wasActive) {
+      animatorRef.current?.setState('celebrate', true)
+    }
   }, [agentActive, activeFlow])
+
+  // 用 ref 跟踪当前 flow，供 useCallback 内部读取最新值（避免闭包陈旧问题）
+  const activeFlowRef = useRef<ActiveFlow>('none')
+  // 自动触发器被阻断时，暂存一个待执行的回调
+  const pendingTrigger = useRef<(() => void) | null>(null)
 
   // ── 心情 tier 变化 → 播一次情绪动画（仅在 idle 流程时，不打扰正在进行的流程） ──
   // 用 ref 记录上一次 tier；仅当 tier 真的变化才触发一次动画，避免反复播
@@ -177,11 +210,6 @@ export default function App() {
     bubbleNowTick,
     mountAt,
   ])
-
-  // 用 ref 跟踪当前 flow，供 useCallback 内部读取最新值（避免闭包陈旧问题）
-  const activeFlowRef = useRef<ActiveFlow>('none')
-  // 自动触发器被阻断时，暂存一个待执行的回调
-  const pendingTrigger = useRef<(() => void) | null>(null)
 
   // 同步更新 flow state + ref
   const setFlow = useCallback((flow: ActiveFlow) => {
@@ -557,18 +585,24 @@ export default function App() {
         )}
         {activeFlow === 'none' && (
           <>
-            {/* 陪伴性状态气泡：根据时间/待办/心情随机显示一句话，不阻塞交互 */}
-            <StatusBubble
-              context={bubbleContext}
-              triggerKey={bubbleTrigger}
-              onTap={() => {
-                // 点击气泡 = 轻拍，等价于抚摸
-                animatorRef.current?.setState('petting', true)
-                setTimeout(() => animatorRef.current?.setState('idle'), 1500)
-                catMood.pet()
-                bumpBubble()
-              }}
-            />
+            {agentNotice ? (
+              <SpeechBubble visible message={agentNotice} onClose={() => setAgentNotice(null)} />
+            ) : (
+              <>
+                {/* 陪伴性状态气泡：根据时间/待办/心情随机显示一句话，不阻塞交互 */}
+                <StatusBubble
+                  context={bubbleContext}
+                  triggerKey={bubbleTrigger}
+                  onTap={() => {
+                    // 点击气泡 = 轻拍，等价于抚摸
+                    animatorRef.current?.setState('petting', true)
+                    setTimeout(() => animatorRef.current?.setState('idle'), 1500)
+                    catMood.pet()
+                    bumpBubble()
+                  }}
+                />
+              </>
+            )}
             <div className="idle-hint">右键查看菜单 · 双击打开 AI 对话</div>
           </>
         )}

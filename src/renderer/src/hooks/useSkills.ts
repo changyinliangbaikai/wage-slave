@@ -9,11 +9,12 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { IPC } from '@shared/ipc-channels'
-import type { SkillWithState, MarketSkillItem } from '@shared/types'
+import type { SkillConfig, SkillWithState, MarketSkillItem } from '@shared/types'
 import {
   listSkills,
   searchSkills as ipcSearchSkills,
   toggleSkill as ipcToggleSkill,
+  updateSkillConfig as ipcUpdateSkillConfig,
   installSkillFromFile,
   installSkillFromUrl,
   installSkillFromMarket,
@@ -75,6 +76,12 @@ export function useSkills() {
     await refresh()
   }, [refresh])
 
+  const updateConfig = useCallback(async (id: string, config: SkillConfig): Promise<{ ok: boolean; error?: string }> => {
+    const res = await ipcUpdateSkillConfig(id, config)
+    if (res.ok) await refresh()
+    return { ok: res.ok, error: res.error }
+  }, [refresh])
+
   // 从本地文件安装
   const installFromFile = useCallback(async (): Promise<{ ok: boolean; error?: string }> => {
     const res = await installSkillFromFile()
@@ -126,6 +133,7 @@ export function useSkills() {
     loadMarket,
     search,
     toggle,
+    updateConfig,
     installFromFile,
     installFromUrl,
     installFromMarket,

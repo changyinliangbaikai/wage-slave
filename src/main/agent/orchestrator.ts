@@ -32,9 +32,11 @@ import { streamLLMWithTools } from './llm-tool-client'
 import { saveAgentSession } from './session-store'
 import { matchSkill, buildSkillPromptAddition } from './skills/matcher'
 import { compressHistoryForLLM } from './context-compressor'
+import { getToolSafety } from './security'
+import { getConfig } from '../store'
 
 /** 编排器最大迭代轮次，防止 LLM 反复调用工具死循环 */
-const MAX_ITERATIONS = 20
+const DEFAULT_MAX_ITERATIONS = 20
 
 /** Agent 流式回调集合 */
 export interface AgentCallbacks {
@@ -53,6 +55,10 @@ export interface AgentRunOptions {
   apiKey: string
   /** 历史消息（不含本轮 user） */
   history: AgentMessage[]
+  /** 可选：覆盖本次执行的最大迭代轮次 */
+  maxIterations?: number
+  /** 可选：本次执行超时时间 */
+  timeoutMs?: number
   /** 流式回调 */
   callbacks: AgentCallbacks
 }
@@ -96,6 +102,15 @@ export class AgentOrchestrator {
     this.history = [...opts.history]
     this.stats = { iterations: 0, toolCalls: 0, totalDurationMs: 0 }
     const overallStart = Date.now()
+    const maxIterations = getMaxIterations(opts.maxIterations)
+    const timeoutMs = normalizeTimeoutMs(opts.timeoutMs)
+    let timedOut = false
+    const timeoutTimer = timeoutMs
+      ? setTimeout(() => {
+          timedOut = true
+          this.abortController?.abort()
+        }, timeoutMs)
+      : null
 
     // ── 把用户输入加入 history ──
     const userMsg: AgentMessage = {
@@ -116,7 +131,7 @@ export class AgentOrchestrator {
     let finalContent = ''
 
     try {
-      while (this.stats.iterations < MAX_ITERATIONS) {
+      while (this.stats.iterations < maxIterations) {
         if (this.abortController.signal.aborted) break
 
         this.stats.iterations++
@@ -181,6 +196,7 @@ export class AgentOrchestrator {
             id: tc.id,
             name: tc.name,
             description: getToolDescription(tc.name),
+            safetyLevel: getToolSafety(tc.name),
             arguments: tc.arguments,
           })),
         })
@@ -216,8 +232,8 @@ export class AgentOrchestrator {
       }
 
       // ── 兜底：达到最大轮次 ──
-      if (this.stats.iterations >= MAX_ITERATIONS && !finalContent) {
-        finalContent = `⚠️ 已达最大迭代轮次（${MAX_ITERATIONS}），任务未在限定步数内完成。`
+      if (this.stats.iterations >= maxIterations && !finalContent) {
+        finalContent = `⚠️ 已达最大迭代轮次（${maxIterations}），任务未在限定步数内完成。`
         this.history.push({
           id: genMsgId('asst'),
           role: 'assistant',
@@ -239,6 +255,7 @@ export class AgentOrchestrator {
         iterations: this.stats.iterations,
         stats: { ...this.stats },
         aborted: wasAborted,
+        abortReason: wasAborted ? (timedOut ? 'timeout' : 'user') : undefined,
       })
     } catch (e: unknown) {
       // 用户主动中断：当作"已完成"处理（保留已经产生的部分）
@@ -251,6 +268,7 @@ export class AgentOrchestrator {
           iterations: this.stats.iterations,
           stats: { ...this.stats },
           aborted: true,
+          abortReason: timedOut ? 'timeout' : 'user',
         })
       } else {
         const msg = e instanceof Error ? e.message : String(e)
@@ -262,6 +280,7 @@ export class AgentOrchestrator {
         })
       }
     } finally {
+      if (timeoutTimer) clearTimeout(timeoutTimer)
       this.running = false
       this.abortController = null
     }
@@ -363,6 +382,17 @@ function historyToApi(m: AgentMessage): {
 
 function genMsgId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function getMaxIterations(override?: number): number {
+  const configured = typeof override === 'number' ? override : getConfig().agent_max_iterations
+  if (typeof configured !== 'number' || Number.isNaN(configured)) return DEFAULT_MAX_ITERATIONS
+  return Math.max(1, Math.min(50, Math.floor(configured)))
+}
+
+function normalizeTimeoutMs(value?: number): number | undefined {
+  if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) return undefined
+  return Math.max(1_000, Math.min(24 * 60 * 60 * 1000, Math.floor(value)))
 }
 
 function isAbortError(e: unknown): boolean {

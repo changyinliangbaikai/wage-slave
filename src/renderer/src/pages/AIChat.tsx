@@ -1150,7 +1150,7 @@ export default function AIChat() {
     // 从内容第一行或前 20 字生成默认文件名
     const firstLine = msg.content.split('\n').find(l => l.trim()) ?? ''
     const stripped = firstLine.replace(/^#+\s*/, '').trim().slice(0, 30)
-    const suggestedName = `${stripped || '小牛马对话'}-${new Date().toISOString().slice(0, 10)}`
+    const suggestedName = `${stripped || '小牛马对话'}-${localDateStr()}`
     const r = await api.invoke(IPC.REPORT_SAVE, {
       content: msg.content,
       suggestedName,

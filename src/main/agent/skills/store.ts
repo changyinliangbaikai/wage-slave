@@ -16,7 +16,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
 import log from 'electron-log/main'
-import type { AgentSkill, SkillInstallRecord, SkillWithState } from '@shared/types'
+import type { AgentSkill, SkillConfig, SkillInstallRecord, SkillWithState } from '@shared/types'
 import { BUILT_IN_SKILLS } from './built-in'
 
 const SKILLS_DIR = path.join(app.getPath('userData'), 'skills')
@@ -63,6 +63,10 @@ function upsertInstallRecord(record: SkillInstallRecord): void {
   if (idx >= 0) records[idx] = record
   else records.push(record)
   saveInstallRecords(records)
+}
+
+function isPlainConfig(config: unknown): config is SkillConfig {
+  return Boolean(config) && typeof config === 'object' && !Array.isArray(config)
 }
 
 // ── 用户 Skill 加载 ────────────────────────────
@@ -115,6 +119,7 @@ export function getAllSkills(): SkillWithState[] {
     installed,
     // 默认启用；installs.json 中若存在记录则以记录为准
     enabled: recordMap.get(s.id)?.enabled ?? true,
+    config: recordMap.get(s.id)?.config ?? {},
   })
 
   const builtins = BUILT_IN_SKILLS.map(s => toState(s, true))
@@ -128,7 +133,7 @@ export function getAllSkills(): SkillWithState[] {
 }
 
 /** 仅返回"已启用"的 skill（matcher 注入用） */
-export function getEnabledSkills(): AgentSkill[] {
+export function getEnabledSkills(): SkillWithState[] {
   return getAllSkills().filter(s => s.enabled)
 }
 
@@ -170,9 +175,31 @@ export function toggleSkill(id: string, enabled?: boolean): SkillWithState | nul
     installedAt: getInstallRecords().find(r => r.skillId === id)?.installedAt ?? new Date().toISOString(),
     source: skill.scope,
     enabled: next,
+    config: skill.config ?? {},
   })
   log.info(`[Skill] ${id} 启用状态 → ${next}`)
   return { ...skill, enabled: next }
+}
+
+/** 保存单个 skill 的用户配置 */
+export function updateSkillConfig(id: string, config: SkillConfig): SkillWithState | null {
+  if (!isPlainConfig(config)) {
+    throw new Error('Skill 配置必须是 JSON 对象')
+  }
+  const skill = getSkillById(id)
+  if (!skill) {
+    log.warn(`[Skill] 配置保存失败，skill 不存在: ${id}`)
+    return null
+  }
+  upsertInstallRecord({
+    skillId: id,
+    installedAt: getInstallRecords().find(r => r.skillId === id)?.installedAt ?? new Date().toISOString(),
+    source: skill.scope,
+    enabled: skill.enabled,
+    config,
+  })
+  log.info(`[Skill] 已保存配置: ${id}`)
+  return { ...skill, config }
 }
 
 /**
@@ -192,6 +219,7 @@ export function saveUserSkill(skill: AgentSkill, source: 'user' | 'remote' = 'us
     installedAt: new Date().toISOString(),
     source,
     enabled: true,
+    config: {},
   })
   log.info(`[Skill] 已安装 skill: ${skill.id} (${source})`)
   return { ...normalized, installed: true, enabled: true }

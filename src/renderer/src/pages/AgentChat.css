@@ -294,6 +294,27 @@
   font-family: var(--agent-mono);
   font-weight: 600;
 }
+.agent-tool-card__safety {
+  border-radius: 999px;
+  padding: 2px 6px;
+  font-size: 10px;
+  line-height: 1;
+  border: 1px solid var(--agent-border);
+  color: var(--agent-text-dim);
+  background: rgba(255, 248, 224, 0.7);
+}
+.agent-tool-card__safety[data-tone='safe'] {
+  color: #4d7c32;
+  border-color: rgba(77, 124, 50, 0.35);
+}
+.agent-tool-card__safety[data-tone='cautious'] {
+  color: #9a641e;
+  border-color: rgba(154, 100, 30, 0.35);
+}
+.agent-tool-card__safety[data-tone='sensitive'] {
+  color: #b13a2f;
+  border-color: rgba(177, 58, 47, 0.35);
+}
 .agent-tool-card__status { font-size: 11px; }
 .agent-tool-card__duration {
   margin-left: auto;

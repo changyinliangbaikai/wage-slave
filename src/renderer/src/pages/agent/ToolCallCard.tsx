@@ -4,7 +4,7 @@ import type { ToolRunUI } from '../../hooks/useAgent'
 /** 工具调用展示卡片：可折叠查看参数与输出 */
 export function ToolCallCard({ run }: { run: ToolRunUI }) {
   const [expanded, setExpanded] = useState(false)
-  const { name, arguments: args, status, output, error, durationMs, description } = run
+  const { name, arguments: args, status, output, error, durationMs, description, safetyLevel } = run
 
   // 状态色与像素风暖色调对齐（橙棕 / 草绿 / 砖红）
   const statusInfo = {
@@ -13,6 +13,11 @@ export function ToolCallCard({ run }: { run: ToolRunUI }) {
     success:  { icon: '✓',  label: '成功',  color: '#5a8f3c' },
     error:    { icon: '✗',  label: '失败',  color: '#c0392b' },
   }[status]
+  const safetyInfo = safetyLevel ? {
+    safe: { label: '只读', tone: 'safe' },
+    cautious: { label: '写入', tone: 'cautious' },
+    sensitive: { label: '敏感', tone: 'sensitive' },
+  }[safetyLevel] : null
 
   return (
     <div className="agent-tool-card" data-status={status}>
@@ -25,6 +30,11 @@ export function ToolCallCard({ run }: { run: ToolRunUI }) {
           {statusInfo.icon}
         </span>
         <span className="agent-tool-card__name">{name}</span>
+        {safetyInfo && (
+          <span className="agent-tool-card__safety" data-tone={safetyInfo.tone}>
+            {safetyInfo.label}
+          </span>
+        )}
         <span className="agent-tool-card__status" style={{ color: statusInfo.color }}>
           {statusInfo.label}
         </span>

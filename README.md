@@ -97,7 +97,8 @@ API Key 存储在系统的凭证管理器中（Windows Credential Manager / macO
 - **兼容主流 LLM**：支持所有 OpenAI API 格式的接口（OpenAI、Claude、DeepSeek、本地 Ollama 等）
 - **小工具箱**：内置实用小工具，包括错别字检查、定时任务管理等
 - **AI Agent**：新增 AI Agent 功能，支持多轮对话和工具调用，可自主规划并执行文件操作、命令执行、定时任务管理等任务
-- **Agent Cron**：定时任务升级，支持「Agent 任务」类型，时间触发后让 Agent 自主规划和执行
+- **技能中心**：支持内置技能、文件/zip/URL 安装、市场搜索筛选、详情查看和一键安装
+- **Agent Cron**：独立 Agent 定时工作流，支持模板、幂等迁移旧任务、定时触发后让 Agent 自主规划和执行
 - **安全增强**：命令黑名单、用户二次确认、工具权限开关等多重安全保护
 
 ---

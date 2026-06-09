@@ -59,6 +59,10 @@ const DEFAULT_CONFIG: AppConfig = {
   // Agent 专用模型配置：默认空，回退到主聊天配置
   agent_llm_api_url: '',
   agent_llm_model: '',
+  // Agent 最大迭代步数：默认 20，防止工具调用死循环
+  agent_max_iterations: 20,
+  // Agent 路径白名单扩展：默认空，用户可在设置页添加额外允许目录
+  agent_allowed_paths_extra: [],
 }
 
 // ── 配置 ──────────────────────────────────────
@@ -158,5 +162,9 @@ export function saveTodos(date: string, todos: TodoItem[]): void {
 }
 
 export function todayStr(): string {
-  return new Date().toISOString().slice(0, 10)
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }

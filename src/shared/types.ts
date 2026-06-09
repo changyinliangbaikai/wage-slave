@@ -55,6 +55,14 @@ export interface AppConfig {
    * Agent 专用模型名称（可选）。如果不填，回退到主聊天的 llm_model
    */
   agent_llm_model?: string
+  /**
+   * Agent 单次任务最大迭代步数，防止工具循环；默认 20
+   */
+  agent_max_iterations?: number
+  /**
+   * Agent 路径白名单扩展：默认白名单之外，用户额外允许 Agent 访问的目录。
+   */
+  agent_allowed_paths_extra?: string[]
 }
 
 /** Agent 工具分组元数据（仅用于设置页 UI 渲染） */
@@ -68,8 +76,12 @@ export interface AgentToolGroupMeta {
 
 /** Agent 安全策略（用于设置页展示） */
 export interface AgentSecurityPolicy {
-  /** 路径白名单（绝对路径前缀） */
+  /** 当前生效路径白名单（绝对路径前缀，默认 + 用户扩展） */
   allowedPaths: string[]
+  /** 应用内置默认路径白名单 */
+  defaultAllowedPaths?: string[]
+  /** 用户额外配置的路径白名单 */
+  customAllowedPaths?: string[]
   /** 命令黑名单规则（正则描述 + 原因） */
   commandBlacklist: { pattern: string; reason: string }[]
 }
@@ -422,6 +434,64 @@ export interface ScheduledTask {
   kind?: TaskKind
   /** Agent 任务参数（仅 kind=agent 时存在） */
   agentTask?: AgentTaskSpec
+  /** Agent Cron 视图元数据（kind=agent 时可选；用于独立 Agent Cron 管理页） */
+  agentCron?: {
+    description?: string
+    context?: string
+    allowedTools?: string[]
+    maxSteps?: number
+    timeoutMinutes?: number
+    notify?: AgentCronNotifyConfig
+  }
+}
+
+// ─────────────────────────────────────────────
+// Agent Cron 模块类型
+// ─────────────────────────────────────────────
+
+/** Agent Cron 通知策略 */
+export interface AgentCronNotifyConfig {
+  onStart: boolean
+  onComplete: boolean
+  onError: boolean
+}
+
+/** Agent Cron 执行体 */
+export interface AgentCronTaskSpec {
+  /** 触发时投喂给 Agent 的目标文本 */
+  goal: string
+  /** 可选上下文，执行时拼接到 goal 后 */
+  context?: string
+  /** 可选工具白名单，当前作为元数据保存，后续可用于工具过滤 */
+  allowedTools?: string[]
+  /** 单次最大步骤数 */
+  maxSteps: number
+  /** 单次超时分钟数，当前作为元数据保存 */
+  timeoutMinutes: number
+}
+
+/** Agent Cron 任务视图模型；底层由 agent/cron/scheduler.ts 独立 JSON 持久化与执行 */
+export interface AgentCronTask {
+  id: string
+  name: string
+  description: string
+  schedule: TaskSchedule
+  agentTask: AgentCronTaskSpec
+  notify: AgentCronNotifyConfig
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+  lastRunAt?: string
+  lastRunStatus?: 'success' | 'failed' | 'running'
+}
+
+/** Agent Cron 模板 */
+export interface AgentCronTemplate {
+  id: string
+  icon: string
+  name: string
+  description: string
+  template: Omit<AgentCronTask, 'id' | 'createdAt' | 'updatedAt' | 'lastRunAt' | 'lastRunStatus'>
 }
 
 /** 任务执行记录 */
@@ -559,8 +629,9 @@ export interface AgentDonePayload {
     toolCalls: number
     totalDurationMs: number
   }
-  /** 本次结束是否由用户主动中断触发（true 时上游应视为 failed） */
+  /** 本次结束是否由用户主动中断或超时触发（true 时上游应视为 failed） */
   aborted?: boolean
+  abortReason?: 'user' | 'timeout'
 }
 
 export interface AgentErrorPayload {
@@ -578,6 +649,8 @@ export interface AgentToolStartPayload {
     name: string
     /** 简短描述（便于 UI 标签） */
     description: string
+    /** 工具安全级别（UI 显示只读/写入/敏感提示） */
+    safetyLevel: 'safe' | 'cautious' | 'sensitive'
     /** 已解析的参数（前端展示） */
     arguments: Record<string, unknown>
   }>
@@ -625,6 +698,9 @@ export type SkillCategory =
   | 'automation' // 自动化：定时、批处理
   | 'custom' // 自定义
 
+/** Skill 用户配置。保持 JSON 结构，具体语义由 Skill Prompt 解释 */
+export type SkillConfig = Record<string, unknown>
+
 /**
  * Agent 技能（预定义工作流模板）
  * 类比：工具是"锤子"，Skill 是"装修方案"
@@ -670,6 +746,8 @@ export interface SkillInstallRecord {
   source: SkillScope
   /** 是否启用（停用后不参与匹配注入） */
   enabled: boolean
+  /** 用户为该 Skill 保存的配置（可选） */
+  config?: SkillConfig
 }
 
 /** 带安装/启用状态的 Skill（列表展示用） */
@@ -678,6 +756,8 @@ export interface SkillWithState extends AgentSkill {
   installed: boolean
   /** 是否启用 */
   enabled: boolean
+  /** 用户为该 Skill 保存的配置 */
+  config?: SkillConfig
 }
 
 /** 市场中的 Skill 条目（含安装统计等发现信息） */

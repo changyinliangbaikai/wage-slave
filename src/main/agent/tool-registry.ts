@@ -32,13 +32,13 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'read_file',
-      description: '读取本地文件内容。支持指定起始行和最大行数，避免读取超大文件。仅允许在路径白名单内的文件。',
+      description: '读取本地文件内容。默认最多读取 200 行；可用 offset + max_lines 分块继续读取，避免超大文件撑爆上下文。仅允许在路径白名单内的文件。',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: '文件的绝对路径，或 ~/ 起始的相对路径' },
           offset: { type: 'integer', description: '起始行号（从 0 开始），默认 0', minimum: 0 },
-          max_lines: { type: 'integer', description: '最大读取行数；缺省读取全部，建议 200 行以内', minimum: 1 },
+          max_lines: { type: 'integer', description: '最大读取行数；缺省 200 行，上限 1000 行', minimum: 1, maximum: 1000 },
         },
         required: ['path'],
       },

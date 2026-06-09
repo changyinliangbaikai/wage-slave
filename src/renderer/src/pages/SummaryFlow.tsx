@@ -16,16 +16,23 @@ interface Props {
 type Step = 'select-range' | 'loading-logs' | 'generating' | 'result' | 'no-data'
 type RangePreset = 'week' | 'month' | 'quarter'
 
+function localDateStr(d: Date = new Date()): string {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 /** 计算时间范围 */
 function getDateRange(preset: RangePreset): { start: string; end: string; label: string } {
   const now = new Date()
-  const end = now.toISOString().slice(0, 10)
+  const end = localDateStr(now)
 
   if (preset === 'week') {
     const d = new Date(now)
     const day = d.getDay()
     d.setDate(d.getDate() - (day === 0 ? 6 : day - 1)) // 回到本周一
-    return { start: d.toISOString().slice(0, 10), end, label: '本周' }
+    return { start: localDateStr(d), end, label: '本周' }
   }
 
   if (preset === 'month') {
@@ -36,7 +43,7 @@ function getDateRange(preset: RangePreset): { start: string; end: string; label:
   // quarter
   const q = Math.floor(now.getMonth() / 3)
   const qStart = new Date(now.getFullYear(), q * 3, 1)
-  const start = qStart.toISOString().slice(0, 10)
+  const start = localDateStr(qStart)
   const qNames = ['Q1', 'Q2', 'Q3', 'Q4']
   return { start, end, label: `${now.getFullYear()} ${qNames[q]}` }
 }

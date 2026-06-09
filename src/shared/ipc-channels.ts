@@ -146,6 +146,7 @@ export const IPC = {
   SKILL_GET:             'renderer:skill-get',             // 按 id 获取单个 skill
   SKILL_SEARCH:          'renderer:skill-search',          // 关键词搜索 skill
   SKILL_TOGGLE:          'renderer:skill-toggle',          // 启用/停用 skill
+  SKILL_UPDATE_CONFIG:   'renderer:skill-update-config',   // 更新单个 skill 的用户配置
   SKILL_INSTALL_FILE:    'renderer:skill-install-file',    // 选本地 skill.json 安装
   SKILL_INSTALL_URL:     'renderer:skill-install-url',     // 从远程 URL 安装
   SKILL_INSTALL_MARKET:  'renderer:skill-install-market',  // 从市场一键安装
@@ -154,6 +155,17 @@ export const IPC = {
   SKILL_OPEN_WINDOW:     'renderer:skill-open-window',     // 打开技能管理窗口
   // main → renderer
   SKILL_CHANGED:         'main:skill-changed',             // skill 列表/状态变化，通知 UI 刷新
+
+  // ── Agent Cron（Phase 3 独立入口，独立 JSON 存储与调度器） ─────
+  // renderer → main
+  AGENT_CRON_LIST:       'renderer:agent-cron-list',       // 列出 Agent Cron 任务
+  AGENT_CRON_SAVE:       'renderer:agent-cron-save',       // 创建/更新 Agent Cron
+  AGENT_CRON_DELETE:     'renderer:agent-cron-delete',     // 删除 Agent Cron
+  AGENT_CRON_TOGGLE:     'renderer:agent-cron-toggle',     // 启用/停用 Agent Cron
+  AGENT_CRON_RUN_NOW:    'renderer:agent-cron-run-now',    // 立即执行 Agent Cron
+  AGENT_CRON_TEMPLATES:  'renderer:agent-cron-templates',  // 获取内置 Agent Cron 模板
+  AGENT_CRON_MIGRATE:    'renderer:agent-cron-migrate',    // 迁移旧 ScheduledTask 到 Agent Cron
+  AGENT_CRON_OPEN_WINDOW:'renderer:agent-cron-open-window', // 打开 Agent Cron 管理窗口
 
   // ── Agent 工具权限（D.1） ───────────────────────
   // renderer → main

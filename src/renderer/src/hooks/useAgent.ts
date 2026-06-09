@@ -26,13 +26,29 @@ import type {
   AgentToolExecutedPayload,
 } from '@shared/types'
 
-const api = window.electronAPI
+const DESKTOP_API_UNAVAILABLE_MESSAGE = '当前页面未连接桌面端能力，请在小小牛马桌面应用窗口中使用 Agent。'
+
+const unavailableApi: typeof window.electronAPI = {
+  invoke: async () => {
+    throw new Error(DESKTOP_API_UNAVAILABLE_MESSAGE)
+  },
+  send: () => {},
+  sendRaw: () => {},
+  on: () => () => {},
+}
+
+const api = window.electronAPI ?? unavailableApi
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback
+}
 
 /** 工具调用 UI 状态 */
 export interface ToolRunUI {
   id: string
   name: string
   description: string
+  safetyLevel?: 'safe' | 'cautious' | 'sensitive'
   arguments: Record<string, unknown>
   status: 'pending' | 'running' | 'success' | 'error'
   output?: string
@@ -119,6 +135,7 @@ export function useAgent(): UseAgentResult {
       id: tc.id,
       name: tc.name,
       description: tc.description,
+      safetyLevel: tc.safetyLevel,
       arguments: tc.arguments,
       status: 'pending',
     }))
@@ -176,20 +193,29 @@ export function useAgent(): UseAgentResult {
     setFatalError(null)
     setCurrentTool(null)
 
-    const result = await api.invoke(IPC.AGENT_START, {
-      sessionId: id,
-      userInput: trimmed,
-    }) as { ok: boolean; sessionId?: string; error?: string }
+    try {
+      const result = await api.invoke(IPC.AGENT_START, {
+        sessionId: id,
+        userInput: trimmed,
+      }) as { ok: boolean; sessionId?: string; error?: string }
 
-    if (!result?.ok) {
+      if (!result?.ok) {
+        setRunning(false)
+        setFatalError(result?.error ?? '启动失败')
+      }
+    } catch (error) {
       setRunning(false)
-      setFatalError(result?.error ?? '启动失败')
+      setFatalError(getErrorMessage(error, '启动失败'))
     }
   }, [running])
 
   /** 中止当前任务 */
   const stopTask = useCallback(async () => {
-    await api.invoke(IPC.AGENT_STOP, { sessionId: sessionIdRef.current })
+    try {
+      await api.invoke(IPC.AGENT_STOP, { sessionId: sessionIdRef.current })
+    } catch {
+      /* 桌面桥不可用或任务已结束时无需额外处理 */
+    }
   }, [])
 
   /** 新开会话：清空消息并生成新 id */
@@ -205,7 +231,13 @@ export function useAgent(): UseAgentResult {
   /** 加载历史会话（把消息转成 UI 形态） */
   const loadSession = useCallback(async (id: string) => {
     if (running) return
-    const session = await api.invoke(IPC.AGENT_GET_SESSION, id) as AgentSession | null
+    let session: AgentSession | null = null
+    try {
+      session = await api.invoke(IPC.AGENT_GET_SESSION, id) as AgentSession | null
+    } catch (error) {
+      setFatalError(getErrorMessage(error, '加载历史会话失败'))
+      return
+    }
     if (!session) return
 
     setSessionId(id)
@@ -313,6 +345,7 @@ function projectHistoryToUI(messages: AgentMessage[]): UIAgentMessage[] {
           id: tc.id,
           name: tc.name,
           description: '',
+          safetyLevel: inferToolSafety(tc.name),
           arguments: parsedArgs,
           status: result?.error ? 'error' : 'success',
           output: result?.output,
@@ -327,19 +360,39 @@ function projectHistoryToUI(messages: AgentMessage[]): UIAgentMessage[] {
   return ui
 }
 
+function inferToolSafety(name: string): ToolRunUI['safetyLevel'] {
+  if (['read_file', 'list_files', 'search_files', 'get_today_log', 'get_todos', 'get_logs_range', 'scheduler_list_tasks', 'wait'].includes(name)) {
+    return 'safe'
+  }
+  if (['run_command', 'open_file'].includes(name)) return 'sensitive'
+  return 'cautious'
+}
+
 /** 列出会话元数据（暴露给会话切换 UI） */
 export async function listAgentSessions(): Promise<AgentSessionMeta[]> {
-  return (await api.invoke(IPC.AGENT_LIST_SESSIONS)) as AgentSessionMeta[]
+  try {
+    return (await api.invoke(IPC.AGENT_LIST_SESSIONS)) as AgentSessionMeta[]
+  } catch {
+    return []
+  }
 }
 
 /** 删除会话 */
 export async function deleteAgentSession(id: string): Promise<boolean> {
-  const r = await api.invoke(IPC.AGENT_DELETE_SESSION, id) as { ok: boolean }
-  return Boolean(r?.ok)
+  try {
+    const r = await api.invoke(IPC.AGENT_DELETE_SESSION, id) as { ok: boolean }
+    return Boolean(r?.ok)
+  } catch {
+    return false
+  }
 }
 
 /** 重命名会话 */
 export async function renameAgentSession(id: string, title: string): Promise<boolean> {
-  const r = await api.invoke(IPC.AGENT_RENAME_SESSION, { id, title }) as { ok: boolean }
-  return Boolean(r?.ok)
+  try {
+    const r = await api.invoke(IPC.AGENT_RENAME_SESSION, { id, title }) as { ok: boolean }
+    return Boolean(r?.ok)
+  } catch {
+    return false
+  }
 }

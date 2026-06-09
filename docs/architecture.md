@@ -6,7 +6,7 @@
 **项目描述**：桌面像素猫助手 - 工作日志与AI对话工具  
 **技术栈**：Electron + React + TypeScript  
 **构建工具**：electron-vite  
-**版本**：2.0.0
+**版本**：2.1.0
 
 ---
 
@@ -52,13 +52,30 @@ xiao-niu-ma/
 | **Word 导出** | `docx-export.ts` | 工作总结导出为 Word 文档 |
 | **桌宠包仓库** | `pet-pack-store.ts` | 注册 `pet://` 协议；扫描/安装/删除桌宠包；广播激活变化 |
 
+#### Agent 模块（agent/）
+
+| 模块 | 文件 | 职责 |
+|------|------|------|
+| **编排器** | `agent/orchestrator.ts` | 多轮 Agent 循环、工具结果回灌、中断和会话持久化 |
+| **LLM Tool Client** | `agent/llm-tool-client.ts` | 流式请求、tool_calls 增量累积、ReAct 文本协议降级 |
+| **工具注册表** | `agent/tool-registry.ts` | OpenAI tools schema、工具分组、工具开关过滤 |
+| **工具执行器** | `agent/tool-executor.ts` | 文件、命令、日志待办、定时任务、通知等工具分发 |
+| **安全护栏** | `agent/security.ts` | 路径白名单、命令黑名单、命令执行二次确认 |
+| **审计日志** | `agent/audit-log.ts` | 记录写入类工具的审计摘要 |
+| **System Prompt** | `agent/system-prompt.ts` | 注入 OS、时间、待办、日志状态与 Skill 引导 |
+| **上下文压缩** | `agent/context-compressor.ts` | 折叠过长历史和工具输出，防止超上下文 |
+| **会话存储** | `agent/session-store.ts` | Agent 会话 list/get/save/delete/rename |
+| **活跃状态** | `agent/active-tracker.ts` | 广播 Agent 活跃计数，驱动小猫 busy 动画 |
+| **Skill 系统** | `agent/skills/` | `types.ts` 类型入口，内置 Skill、安装、启停、配置、匹配、市场索引 |
+| **Agent Cron** | `agent/cron/` | 独立 JSON 存储、30 秒调度、休眠唤醒、幂等一键迁移和内置模板 |
+
 #### 工具模块（tools/）
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | **工具入口** | `index.ts` | 工具模块 IPC 路由 |
 | **错别字检查** | `spell-check.ts` | 文本错别字检查（流式） |
-| **定时任务** | `task-scheduler.ts` | 定时任务调度引擎 |
+| **定时任务** | `task-scheduler.ts` | 普通定时任务调度引擎，保留 shell 与历史 Agent 任务体兼容 |
 
 ---
 
@@ -92,6 +109,9 @@ xiao-niu-ma/
 | **日志查看** | `LogViewer.tsx` | 工作日志历史查看 |
 | **小工具** | `ToolsPage.tsx` | 小工具入口页面 |
 | **AI 对话** | `AIChat.tsx` | AI 快速对话窗口 |
+| **Agent 对话** | `AgentChat.tsx` | Agent 独立对话窗口，展示流式回复与工具调用卡片 |
+| **技能中心** | `SkillsPage.tsx` | Skill 搜索、启停、配置、卸载、文件/zip/URL 安装与市场浏览 |
+| **Agent Cron** | `agent/AgentCronPage.tsx` | Agent Cron 管理页，支持模板、编辑、立即执行，以及保留或停用原任务的迁移 |
 | **晨间流程** | `MorningFlow.tsx` | 晨间计划录入流程 |
 | **休息提醒** | `BreakReminder.tsx` | 休息提醒界面 |
 | **晚间流程** | `EveningFlow.tsx` | 晚间复盘流程 |
@@ -103,6 +123,17 @@ xiao-niu-ma/
 |------|------|
 | `personas.ts` | AI 对话预置角色定义 |
 | `slash-commands.ts` | AI 对话斜杠命令 |
+
+#### Agent 子模块（agent/）
+
+| 文件 | 职责 |
+|------|------|
+| `AgentInput.tsx` | Agent 多行输入框与停止按钮 |
+| `ToolCallCard.tsx` | 工具调用状态卡片 |
+| `AgentSettings.tsx` | Agent 模型、工具权限、路径白名单编辑和安全策略设置 |
+| `SkillManager.tsx` | 已安装 Skill 搜索、启停、配置、卸载、文件/zip/URL 安装 |
+| `SkillMarket.tsx` | Skill 市场搜索、分类筛选、详情查看与安装 |
+| `AgentCronPage.tsx` | Agent Cron 列表、模板、编辑、立即执行，以及保留或停用原任务的迁移 |
 
 #### 组件（components/）
 
@@ -127,6 +158,8 @@ xiao-niu-ma/
 | **IPC 封装** | `useIPC.ts` | 封装 IPC 调用（配置、数据、窗口操作） |
 | **心情系统** | `useCatMood.ts` | 像素猫心情/饥饿度系统 |
 | **LLM 封装** | `useLLM.ts` | LLM 调用封装 |
+| **Agent 封装** | `useAgent.ts` | Agent 会话、流式事件、工具调用状态管理 |
+| **Skill 封装** | `useSkills.ts` | Skill 列表、搜索、安装、市场和变更事件管理 |
 
 #### 桌宠渲染引擎（pet-engine/）
 
@@ -636,11 +669,15 @@ npm run format       # Prettier 格式化
 
 扩展 `TaskSchedule` 类型，在 `task-scheduler.ts` 实现调度逻辑。
 
-### 4. 新增 LLM 提供商兼容
+### 4. 新增 Agent Cron 模板
+
+在 `src/main/agent/cron/built-in-templates.ts` 添加模板；任务持久化在 `{userData}/agent-cron/tasks.json`，由 `agent/cron/scheduler.ts` 独立调度。
+
+### 5. 新增 LLM 提供商兼容
 
 在 `ai-chat-service.ts` 添加新的响应解析逻辑。
 
-### 5. 制作新的桌宠包
+### 6. 制作新的桌宠包
 
 用户视角：在「设置 → 桌宠外观」上传任意尺寸 PNG，导入弹窗会让你框选裁切出 12 帧区域（推荐 1440×144）。  
 高级作者：参见 `docs/pet-pack-spec.md` 了解 `manifest.json` 完整字段（含帧序列模式、自定义 fps）。

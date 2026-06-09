@@ -35,6 +35,7 @@ let toolWindow: BrowserWindow | null = null
 let aiChatWindow: BrowserWindow | null = null
 let agentChatWindow: BrowserWindow | null = null
 let skillsWindow: BrowserWindow | null = null
+let agentCronWindow: BrowserWindow | null = null
 
 const isDev = !app.isPackaged
 
@@ -417,4 +418,38 @@ export function openSkillsWindow(): void {
 
 export function getSkillsWindow(): BrowserWindow | null {
   return skillsWindow
+}
+
+// ── Agent Cron 管理窗口 ───────────────────────
+export function openAgentCronWindow(): void {
+  if (agentCronWindow && !agentCronWindow.isDestroyed()) {
+    if (agentCronWindow.isMinimized()) agentCronWindow.restore()
+    agentCronWindow.show()
+    agentCronWindow.focus()
+    return
+  }
+
+  agentCronWindow = new BrowserWindow({
+    width: 860,
+    height: 720,
+    minWidth: 620,
+    minHeight: 520,
+    title: '小小牛马 · Agent Cron',
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  agentCronWindow.loadURL(getRendererURL('/agent-cron'))
+
+  agentCronWindow.on('closed', () => {
+    agentCronWindow = null
+  })
+}
+
+export function getAgentCronWindow(): BrowserWindow | null {
+  return agentCronWindow
 }

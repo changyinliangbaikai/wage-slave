@@ -8,6 +8,7 @@ import ToolsPage from './pages/ToolsPage'
 import AIChat from './pages/AIChat'
 import AgentChat from './pages/AgentChat'
 import SkillsPage from './pages/SkillsPage'
+import AgentCronPage from './pages/agent/AgentCronPage'
 import ErrorBoundary from './components/ErrorBoundary'
 import './App.css'
 
@@ -33,6 +34,7 @@ function RootPage() {
   if (hash === '#/ai-chat') return <AIChat />
   if (hash === '#/agent') return <AgentChat />
   if (hash === '#/skills') return <SkillsPage />
+  if (hash === '#/agent-cron') return <AgentCronPage />
   return <App />
 }
 

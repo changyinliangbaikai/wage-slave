@@ -1,0 +1,227 @@
+.agent-cron-page {
+  min-height: 100vh;
+  padding: 18px;
+  background: #f7f5ef;
+  color: #3a2a1a;
+  font-family: "Microsoft YaHei", "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+  box-sizing: border-box;
+}
+
+.agent-cron-page * {
+  box-sizing: border-box;
+}
+
+.agent-cron-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.agent-cron-header h1 {
+  margin: 0;
+  font-size: 22px;
+  color: #8b5e3c;
+}
+
+.agent-cron-header p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #8b7a5d;
+}
+
+.agent-cron-actions,
+.agent-cron-form-actions,
+.agent-cron-card footer div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-cron-page button {
+  border: 1px solid #d6cdb6;
+  background: #fffef7;
+  color: #3a2a1a;
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.agent-cron-page button:hover {
+  border-color: #c0733a;
+  background: #fff8e7;
+}
+
+.agent-cron-page button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.agent-cron-toast {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid #d6cdb6;
+  background: #fffef7;
+  color: #8b5e3c;
+  border-radius: 6px;
+}
+
+.agent-cron-template-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.agent-cron-template-strip button {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+}
+
+.agent-cron-form,
+.agent-cron-card,
+.agent-cron-empty {
+  background: #fffef7;
+  border: 1px solid #e5e0d1;
+  border-radius: 8px;
+}
+
+.agent-cron-form {
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.agent-cron-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.agent-cron-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: #8b7a5d;
+}
+
+.agent-cron-form label.wide {
+  grid-column: 1 / -1;
+}
+
+.agent-cron-form input,
+.agent-cron-form textarea,
+.agent-cron-form select {
+  width: 100%;
+  border: 1px solid #d6cdb6;
+  border-radius: 6px;
+  background: #fff;
+  color: #3a2a1a;
+  padding: 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.agent-cron-form textarea {
+  resize: vertical;
+}
+
+.agent-cron-form .check-row {
+  flex-direction: row;
+  align-items: center;
+  color: #3a2a1a;
+}
+
+.agent-cron-form .check-row input {
+  width: auto;
+}
+
+.agent-cron-form-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.agent-cron-list {
+  display: grid;
+  gap: 10px;
+}
+
+.agent-cron-card {
+  padding: 14px;
+}
+
+.agent-cron-card.disabled {
+  opacity: 0.64;
+}
+
+.agent-cron-card-main {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.agent-cron-card h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.agent-cron-card p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: #8b7a5d;
+}
+
+.agent-cron-card-main > span {
+  flex: 0 0 auto;
+  color: #8b5e3c;
+  font-size: 12px;
+  border: 1px solid #e5e0d1;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #fff8e7;
+}
+
+.agent-cron-card pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 10px 0;
+  padding: 10px;
+  border-radius: 6px;
+  background: #f7f5ef;
+  border: 1px solid #e5e0d1;
+  color: #3a2a1a;
+  font: 12px/1.5 "Courier New", ui-monospace, monospace;
+}
+
+.agent-cron-card footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  color: #8b7a5d;
+  font-size: 12px;
+}
+
+.agent-cron-empty {
+  padding: 42px 14px;
+  text-align: center;
+  color: #8b7a5d;
+}
+
+@media (max-width: 680px) {
+  .agent-cron-header,
+  .agent-cron-card-main,
+  .agent-cron-card footer {
+    flex-direction: column;
+  }
+
+  .agent-cron-form-grid {
+    grid-template-columns: 1fr;
+  }
+}

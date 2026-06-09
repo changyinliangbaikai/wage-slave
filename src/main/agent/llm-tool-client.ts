@@ -140,7 +140,7 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
     stream: true,
   }
 
-  log.info(`[AgentLLM] 发起请求 model=${config.llm_model} messages=${params.messages.length} tools=${params.tools.length}`)
+  log.info(`[AgentLLM] 发起请求 model=${model} messages=${params.messages.length} tools=${params.tools.length}`)
 
   let res: Response
   try {
@@ -162,6 +162,10 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '')
+    if (params.tools.length > 0 && isToolUnsupportedError(res.status, errText)) {
+      log.warn(`[AgentLLM] 当前模型/API 不支持 tool_calls，切换 ReAct 文本协议: HTTP ${res.status}`)
+      return await streamLLMReactFallback(params, errText)
+    }
     throw new Error(`LLM API 返回 ${res.status}: ${errText.slice(0, 200)}`)
   }
   if (!res.body) {
@@ -278,6 +282,231 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
     finishReason,
     aborted: false,
   }
+}
+
+/**
+ * ReAct 文本协议降级：
+ * 某些 OpenAI 兼容接口会拒绝 tools/tool_choice 参数。此时不让 Agent 整体失败，
+ * 而是重试一次普通对话，并要求模型用 <tool_call>{...}</tool_call> 标签表达工具调用。
+ */
+async function streamLLMReactFallback(params: StreamLLMParams, originalError: string): Promise<StreamResult> {
+  const config = getConfig()
+  const baseUrl = (config.agent_llm_api_url || config.llm_api_url).replace(/\/$/, '')
+  const model = config.agent_llm_model || config.llm_model
+  const splitter = new ThinkSplitter()
+  let fullContent = ''
+  let fullReasoning = ''
+  let finishReason: string | null = null
+
+  const fallbackMessages = injectFallbackProtocol(params.messages, params.tools, originalError)
+  const body = {
+    model,
+    messages: fallbackMessages,
+    temperature: params.temperature ?? 0.3,
+    max_tokens: params.maxTokens ?? 4096,
+    stream: true,
+  }
+
+  let res: Response
+  try {
+    res = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${params.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: params.signal,
+    })
+  } catch (e: unknown) {
+    if (isAbortError(e)) {
+      return { content: fullContent, reasoning: fullReasoning, toolCalls: [], finishReason, aborted: true }
+    }
+    throw e
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '')
+    throw new Error(`LLM API 降级请求仍失败 ${res.status}: ${errText.slice(0, 200)}`)
+  }
+  if (!res.body) {
+    throw new Error('LLM 降级响应 body 为空')
+  }
+
+  const reader = res.body.getReader()
+  const decoder = new TextDecoder()
+  let sseBuffer = ''
+
+  try {
+    outer: while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      sseBuffer += decoder.decode(value, { stream: true })
+      const lines = sseBuffer.split('\n')
+      sseBuffer = lines.pop() ?? ''
+
+      for (const rawLine of lines) {
+        const line = rawLine.trimEnd()
+        if (!line || line.startsWith(':')) continue
+        if (!line.startsWith('data:')) continue
+        const data = line.slice(5).trim()
+        if (data === '[DONE]') break outer
+
+        let chunk: SSEChunk
+        try {
+          chunk = JSON.parse(data) as SSEChunk
+        } catch {
+          continue
+        }
+
+        const choice = chunk.choices?.[0]
+        if (!choice) continue
+        const delta = choice.delta ?? {}
+
+        const reasoningDelta = (delta.reasoning_content ?? delta.reasoning ?? '') as string
+        if (reasoningDelta) fullReasoning += reasoningDelta
+
+        if (typeof delta.content === 'string' && delta.content.length > 0) {
+          const parts = splitter.push(delta.content)
+          if (parts.reasoning) fullReasoning += parts.reasoning
+          if (parts.content) fullContent += parts.content
+        }
+
+        if ((reasoningDelta || (delta.content && delta.content.length > 0)) && params.onDelta) {
+          params.onDelta({ content: stripFallbackToolTags(fullContent), reasoning: fullReasoning })
+        }
+
+        if (choice.finish_reason) {
+          finishReason = choice.finish_reason
+        }
+      }
+    }
+  } catch (e: unknown) {
+    if (isAbortError(e)) {
+      const tail = splitter.flush()
+      if (tail.reasoning) fullReasoning += tail.reasoning
+      if (tail.content) fullContent += tail.content
+      return { content: stripFallbackToolTags(fullContent), reasoning: fullReasoning, toolCalls: [], finishReason, aborted: true }
+    }
+    throw e
+  }
+
+  const tail = splitter.flush()
+  if (tail.reasoning) fullReasoning += tail.reasoning
+  if (tail.content) fullContent += tail.content
+
+  const parsed = parseFallbackToolCalls(fullContent)
+  log.info(`[AgentLLM] ReAct 降级完成 finish=${finishReason ?? 'null'} content=${parsed.content.length}字 toolCalls=${parsed.toolCalls.length}`)
+  return {
+    content: parsed.content,
+    reasoning: fullReasoning,
+    toolCalls: parsed.toolCalls,
+    finishReason,
+    aborted: false,
+  }
+}
+
+function injectFallbackProtocol(
+  messages: StreamLLMParams['messages'],
+  tools: ToolSchema[],
+  originalError: string,
+): StreamLLMParams['messages'] {
+  const toolList = tools.map(t => ({
+    name: t.function.name,
+    description: t.function.description,
+    parameters: t.function.parameters,
+  }))
+  const protocol = `\n\n# 工具调用降级协议\n\n当前模型或 API 不支持 OpenAI tool_calls（原始错误：${originalError.slice(0, 160)}）。\n如果需要调用工具，只输出一个或多个工具标签，每个标签一行：\n<tool_call>{"name":"工具名","arguments":{}}</tool_call>\n\n规则：\n- name 必须来自下方工具列表\n- arguments 必须是 JSON 对象\n- 需要工具时不要编造最终结果，先输出 tool_call 标签等待工具结果\n- 不需要工具时正常回复，不要输出 tool_call 标签\n\n可用工具：\n${JSON.stringify(toolList, null, 2)}`
+
+  const normalizedMessages = normalizeMessagesForReactFallback(messages)
+  const [first, ...rest] = normalizedMessages
+  if (first?.role === 'system') {
+    return [{ ...first, content: first.content + protocol }, ...rest]
+  }
+  return [{ role: 'system', content: protocol }, ...normalizedMessages]
+}
+
+function normalizeMessagesForReactFallback(messages: StreamLLMParams['messages']): StreamLLMParams['messages'] {
+  return messages.map(m => {
+    if (m.role === 'tool') {
+      return {
+        role: 'user',
+        content: [
+          `工具结果（${m.name ?? m.tool_call_id ?? 'unknown'}）：`,
+          m.content,
+        ].join('\n'),
+      }
+    }
+
+    if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+      const calls = m.tool_calls
+        .map(tc => `${tc.function.name}(${tc.function.arguments || '{}'})`)
+        .join('\n')
+      return {
+        role: 'assistant',
+        content: [
+          m.content,
+          `[已请求工具]\n${calls}`,
+        ].filter(Boolean).join('\n\n'),
+      }
+    }
+
+    return {
+      role: m.role,
+      content: m.content,
+    }
+  })
+}
+
+function parseFallbackToolCalls(rawContent: string): { content: string; toolCalls: AgentToolCall[] } {
+  const toolCalls: AgentToolCall[] = []
+  const tagPattern = /<tool_call>([\s\S]*?)<\/tool_call>/gi
+  let match: RegExpExecArray | null
+  let idx = 0
+  while ((match = tagPattern.exec(rawContent)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim()) as { name?: unknown; arguments?: unknown }
+      if (typeof parsed.name !== 'string' || !parsed.name.trim()) continue
+      const args = parsed.arguments && typeof parsed.arguments === 'object'
+        ? parsed.arguments as Record<string, unknown>
+        : {}
+      toolCalls.push({
+        id: `react_${Date.now()}_${idx++}`,
+        name: parsed.name,
+        arguments: args,
+      })
+    } catch (e) {
+      log.warn('[AgentLLM] ReAct 工具标签解析失败:', e)
+    }
+  }
+  return {
+    content: stripFallbackToolTags(rawContent).trim(),
+    toolCalls,
+  }
+}
+
+function stripFallbackToolTags(content: string): string {
+  return content.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').trim()
+}
+
+function isToolUnsupportedError(status: number, text: string): boolean {
+  if (status < 400 || status >= 500) return false
+  const lower = text.toLowerCase()
+  const mentionsToolParam =
+    lower.includes('tool') ||
+    lower.includes('function_call') ||
+    lower.includes('function calling') ||
+    lower.includes('functions')
+  const looksUnsupported =
+    lower.includes('not support') ||
+    lower.includes('unsupported') ||
+    lower.includes('unknown parameter') ||
+    lower.includes('unrecognized') ||
+    lower.includes('extra fields') ||
+    lower.includes('invalid parameter') ||
+    lower.includes('tool_choice')
+  return mentionsToolParam && looksUnsupported
 }
 
 /** SSE chunk 的 OpenAI 兼容结构 */

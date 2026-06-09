@@ -6,16 +6,16 @@
  *
  * 跨平台关键修正（对比方案文档）：
  *  - search_files：用 Node 递归实现，不再依赖 grep
- *  - run_command：用 child_process.exec 跨平台执行
+ *  - run_command：用 child_process.spawn 跨平台执行
  *  - 路径白名单：assertSafePath 跨平台（参见 security.ts）
  *  - 命令编码：复用 task-scheduler 的 decodeProcessOutput 思路
  */
 
-import { exec, type ExecOptions } from 'child_process'
-import { promisify } from 'util'
+import { spawn } from 'child_process'
 import * as fs from 'fs/promises'
 import * as fsSync from 'fs'
 import * as path from 'path'
+import * as readline from 'readline'
 import * as iconv from 'iconv-lite'
 import log from 'electron-log/main'
 import { shell, BrowserWindow } from 'electron'
@@ -37,11 +37,13 @@ import {
 } from '../store'
 import { assertSafePath, expandHome, checkCommand, confirmCommandWithUser } from './security'
 import { isToolEnabled } from './tool-registry'
-
-const execAsync = promisify(exec)
+import { recordAgentAudit } from './audit-log'
 
 /** 工具最大输出字符数（防止把整个仓库灌给 LLM） */
 const MAX_TOOL_OUTPUT = 16_000
+const DEFAULT_READ_FILE_LINES = 200
+const MAX_READ_FILE_LINES = 1_000
+const MAX_COMMAND_BUFFER = 4 * 1024 * 1024
 
 /**
  * 工具执行入口
@@ -134,19 +136,20 @@ async function toolReadFile(args: unknown): Promise<string> {
   const target = expandHome(p)
   // 读取也走白名单（避免读取系统敏感文件如 /etc/passwd）
   assertSafePath(target)
-  const content = await fs.readFile(target, 'utf-8')
+  const safeOffset = Math.max(0, Math.floor(offset))
+  const requestedLines = typeof max_lines === 'number' && max_lines > 0
+    ? Math.floor(max_lines)
+    : DEFAULT_READ_FILE_LINES
+  const safeMaxLines = clamp(requestedLines, 1, MAX_READ_FILE_LINES)
+  const { lines, truncated } = await readFileLines(target, safeOffset, safeMaxLines)
+  const note = [
+    `[文件: ${target}] 第 ${safeOffset + 1}-${safeOffset + lines.length} 行，最多读取 ${safeMaxLines} 行`,
+    max_lines === undefined ? `未指定 max_lines，已使用默认限制 ${DEFAULT_READ_FILE_LINES} 行` : '',
+    requestedLines > MAX_READ_FILE_LINES ? `max_lines 超过上限，已限制为 ${MAX_READ_FILE_LINES} 行` : '',
+    truncated ? `后续内容已省略；可用 offset=${safeOffset + lines.length} 继续分块读取` : '',
+  ].filter(Boolean).join('；')
 
-  if (typeof max_lines === 'number' && max_lines > 0) {
-    const lines = content.split('\n')
-    const slice = lines.slice(offset, offset + max_lines)
-    const total = lines.length
-    return [
-      `[文件: ${target}] 第 ${offset + 1}-${Math.min(offset + max_lines, total)} 行 / 共 ${total} 行`,
-      slice.join('\n'),
-    ].join('\n')
-  }
-
-  return [`[文件: ${target}] 共 ${content.length} 字符`, content].join('\n')
+  return [note, lines.join('\n')].join('\n')
 }
 
 interface WriteFileArgs { path: string; content: string }
@@ -157,6 +160,12 @@ async function toolWriteFile(args: unknown): Promise<string> {
   assertSafePath(target)
   await fs.mkdir(path.dirname(target), { recursive: true })
   await fs.writeFile(target, content, 'utf-8')
+  recordAgentAudit({
+    tool: 'write_file',
+    action: 'write',
+    target,
+    summary: `写入 ${content.length} 字符`,
+  })
   return `已写入: ${target}（${content.length} 字符）`
 }
 
@@ -179,6 +188,12 @@ async function toolEditFile(args: unknown): Promise<string> {
     }
     const updated = content.split(old_string).join(new_string)
     await fs.writeFile(target, updated, 'utf-8')
+    recordAgentAudit({
+      tool: 'edit_file',
+      action: 'replace_all',
+      target,
+      summary: `替换 ${occurrences} 处`,
+    })
     return `已替换 ${occurrences} 处于 ${target}`
   }
 
@@ -193,6 +208,12 @@ async function toolEditFile(args: unknown): Promise<string> {
   }
   const updated = content.slice(0, idx) + new_string + content.slice(idx + old_string.length)
   await fs.writeFile(target, updated, 'utf-8')
+  recordAgentAudit({
+    tool: 'edit_file',
+    action: 'replace_one',
+    target,
+    summary: '替换 1 处',
+  })
   return `已替换 1 处于 ${target}`
 }
 
@@ -277,28 +298,98 @@ async function toolRunCommand(args: unknown): Promise<string> {
   if (!userAllowed) {
     throw new Error(`用户拒绝执行命令: "${preview(command, 80)}"`)
   }
-  const opts: ExecOptions = {
-    timeout,
-    cwd: work_dir ? expandHome(work_dir) : undefined,
-    maxBuffer: 4 * 1024 * 1024,  // 4MB
-    // 不指定 encoding，让 exec 返回 Buffer，自行解码处理 Windows GBK
-    encoding: 'buffer' as unknown as BufferEncoding,
-    windowsHide: true,
-  }
+  const cwd = work_dir ? expandHome(work_dir) : undefined
+  recordAgentAudit({
+    tool: 'run_command',
+    action: 'run_command',
+    target: cwd ?? process.cwd(),
+    summary: preview(command, 200),
+  })
 
-  try {
-    const { stdout, stderr } = await execAsync(command, opts) as unknown as { stdout: Buffer; stderr: Buffer }
-    const out = decodeProcessOutput(stdout)
-    const err = decodeProcessOutput(stderr)
-    return [out, err].filter(Boolean).join('\n').trim() || '(命令执行完成，无输出)'
-  } catch (e: unknown) {
-    // exec 失败时 e 携带 stdout/stderr/code
-    const err = e as { code?: number; killed?: boolean; signal?: string; stdout?: Buffer; stderr?: Buffer; message?: string }
-    const out = err.stdout ? decodeProcessOutput(err.stdout) : ''
-    const errMsg = err.stderr ? decodeProcessOutput(err.stderr) : (err.message ?? String(e))
-    const codeInfo = err.code !== undefined ? `（exitCode=${err.code}${err.killed ? `, killed=${err.signal}` : ''}）` : ''
-    throw new Error(`命令失败${codeInfo}：${[out, errMsg].filter(Boolean).join('\n').trim()}`)
+  const result = await spawnShellCommand(command, { cwd, timeoutMs: timeout, maxBuffer: MAX_COMMAND_BUFFER })
+  const out = decodeProcessOutput(result.stdout)
+  const err = decodeProcessOutput(result.stderr)
+  const combined = [out, err].filter(Boolean).join('\n').trim()
+  if (result.timedOut) {
+    throw new Error(`命令超时（${timeout}ms）：${combined || preview(command, 120)}`)
   }
+  if (result.exceededBuffer) {
+    throw new Error(`命令输出超过 ${MAX_COMMAND_BUFFER} bytes，已中止：${combined.slice(0, 2000)}`)
+  }
+  if (result.code !== 0) {
+    const codeInfo = `（exitCode=${result.code ?? 'null'}${result.signal ? `, signal=${result.signal}` : ''}）`
+    throw new Error(`命令失败${codeInfo}：${combined || preview(command, 120)}`)
+  }
+  return combined || '(命令执行完成，无输出)'
+}
+
+interface SpawnCommandOptions {
+  cwd?: string
+  timeoutMs: number
+  maxBuffer: number
+}
+
+interface SpawnCommandResult {
+  stdout: Buffer
+  stderr: Buffer
+  code: number | null
+  signal: NodeJS.Signals | null
+  timedOut: boolean
+  exceededBuffer: boolean
+}
+
+function spawnShellCommand(command: string, options: SpawnCommandOptions): Promise<SpawnCommandResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, {
+      cwd: options.cwd,
+      shell: true,
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+
+    const stdoutChunks: Buffer[] = []
+    const stderrChunks: Buffer[] = []
+    let stdoutBytes = 0
+    let stderrBytes = 0
+    let timedOut = false
+    let exceededBuffer = false
+
+    const killForLimit = () => {
+      exceededBuffer = true
+      child.kill()
+    }
+
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, options.timeoutMs)
+
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdoutChunks.push(chunk)
+      stdoutBytes += chunk.length
+      if (stdoutBytes + stderrBytes > options.maxBuffer) killForLimit()
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderrChunks.push(chunk)
+      stderrBytes += chunk.length
+      if (stdoutBytes + stderrBytes > options.maxBuffer) killForLimit()
+    })
+    child.on('error', err => {
+      clearTimeout(timer)
+      reject(err)
+    })
+    child.on('close', (code, signal) => {
+      clearTimeout(timer)
+      resolve({
+        stdout: Buffer.concat(stdoutChunks),
+        stderr: Buffer.concat(stderrChunks),
+        code,
+        signal,
+        timedOut,
+        exceededBuffer,
+      })
+    })
+  })
 }
 
 /**
@@ -351,6 +442,12 @@ async function toolSaveTodo(args: unknown): Promise<string> {
   saveTodos(today, todos)
   // 同步刷新 daily log（保持与现有 IPC TODOS_SAVE 行为一致）
   saveLog({ date: today, todos })
+  recordAgentAudit({
+    tool: 'save_todo',
+    action: 'create_todo',
+    target: today,
+    summary: `${newTodo.title} (${newTodo.priority})`,
+  })
   return `已新增待办: ${newTodo.title}（id=${newTodo.id}, priority=${newTodo.priority}）`
 }
 
@@ -375,6 +472,12 @@ async function toolUpdateTodo(args: unknown): Promise<string> {
 
   saveTodos(today, todos)
   saveLog({ date: today, todos })
+  recordAgentAudit({
+    tool: 'update_todo',
+    action: 'update_todo',
+    target: id,
+    summary: diffSummary(before, todos[idx]),
+  })
 
   return `已更新待办: ${todos[idx].title}（变更：${diffSummary(before, todos[idx])}）`
 }
@@ -390,6 +493,12 @@ async function toolAppendLog(args: unknown): Promise<string> {
   }
   const merged = (existing?.eod_log ? existing.eod_log + '\n' : '') + content
   saveLog({ date: today, eod_log: merged })
+  recordAgentAudit({
+    tool: 'append_log',
+    action: 'append_log',
+    target: today,
+    summary: `追加 ${content.length} 字符到 ${append_to}`,
+  })
   return `已追加 ${content.length} 字符到 ${today} 的 eod_log`
 }
 
@@ -517,6 +626,12 @@ async function toolSchedulerCreateTask(args: unknown): Promise<string> {
   }
 
   const task = saveTask(draft)
+  recordAgentAudit({
+    tool: 'scheduler_create_task',
+    action: 'create_task',
+    target: task.id,
+    summary: `${task.name} (${task.kind ?? 'shell'}, ${formatScheduleStr(task.schedule)})`,
+  })
   log.info(`[AgentTool] scheduler_create_task: id=${task.id} name="${task.name}" kind=${task.kind} ${formatScheduleStr(task.schedule)}`)
   return [
     `✅ 已创建定时任务：${task.name}`,
@@ -571,6 +686,12 @@ async function toolSchedulerUpdateTask(args: unknown): Promise<string> {
   }
 
   const updated = saveTask(merged)
+  recordAgentAudit({
+    tool: 'scheduler_update_task',
+    action: 'update_task',
+    target: updated.id,
+    summary: `${updated.name} (${formatScheduleStr(updated.schedule)}, ${updated.enabled ? 'enabled' : 'disabled'})`,
+  })
   log.info(`[AgentTool] scheduler_update_task: id=${updated.id} name="${updated.name}" ${formatScheduleStr(updated.schedule)}`)
   return [
     `✅ 已更新定时任务：${updated.name}`,
@@ -589,6 +710,12 @@ async function toolSchedulerDeleteTask(args: unknown): Promise<string> {
   if (!target) throw new Error(`定时任务不存在: ${id}`)
   const ok = deleteTask(id)
   if (!ok) throw new Error(`删除失败: ${id}`)
+  recordAgentAudit({
+    tool: 'scheduler_delete_task',
+    action: 'delete_task',
+    target: id,
+    summary: target.name,
+  })
   log.info(`[AgentTool] scheduler_delete_task: id=${id} name="${target.name}"`)
   return `🗑 已删除定时任务：${target.name} (id=${id})`
 }
@@ -598,6 +725,12 @@ async function toolSchedulerToggleTask(args: unknown): Promise<string> {
   const { toggleTask } = await loadScheduler()
   const task = toggleTask(id)
   if (!task) throw new Error(`定时任务不存在: ${id}`)
+  recordAgentAudit({
+    tool: 'scheduler_toggle_task',
+    action: 'toggle_task',
+    target: task.id,
+    summary: `${task.name} -> ${task.enabled ? 'enabled' : 'disabled'}`,
+  })
   log.info(`[AgentTool] scheduler_toggle_task: id=${task.id} enabled=${task.enabled}`)
   return `${task.enabled ? '▶ 已启用' : '⏸ 已禁用'} 定时任务：${task.name} (id=${task.id})`
 }
@@ -708,6 +841,38 @@ function countOccurrences(text: string, sub: string): number {
 
 function clamp(n: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, n))
+}
+
+async function readFileLines(
+  filePath: string,
+  offset: number,
+  maxLines: number,
+): Promise<{ lines: string[]; truncated: boolean }> {
+  const stream = fsSync.createReadStream(filePath, { encoding: 'utf-8' })
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
+  const lines: string[] = []
+  let lineNo = 0
+  let truncated = false
+
+  try {
+    for await (const line of rl) {
+      if (lineNo < offset) {
+        lineNo++
+        continue
+      }
+      if (lines.length >= maxLines) {
+        truncated = true
+        break
+      }
+      lines.push(line)
+      lineNo++
+    }
+  } finally {
+    rl.close()
+    stream.destroy()
+  }
+
+  return { lines, truncated }
 }
 
 function globToRegex(pattern: string): RegExp {

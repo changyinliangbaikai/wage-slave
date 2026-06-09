@@ -8,8 +8,10 @@ import { IPC } from '@shared/ipc-channels'
 import type {
   AppConfig, DailyLog, TodoItem,
   TriggerMorningPayload, TriggerBreakPayload, TriggerEveningPayload,
-  SkillWithState, MarketSkillItem,
+  SkillConfig, SkillWithState, MarketSkillItem,
   ScheduledTask,
+  AgentCronTask,
+  AgentCronTemplate,
 } from '@shared/types'
 
 /** Skill 安装/操作通用返回 */
@@ -32,7 +34,18 @@ declare global {
   }
 }
 
-const api = window.electronAPI
+const DESKTOP_API_UNAVAILABLE_MESSAGE = '当前页面未连接桌面端能力，请在小小牛马桌面应用窗口中使用。'
+
+const unavailableApi: Window['electronAPI'] = {
+  invoke: async () => {
+    throw new Error(DESKTOP_API_UNAVAILABLE_MESSAGE)
+  },
+  send: () => {},
+  sendRaw: () => {},
+  on: () => () => {},
+}
+
+const api = window.electronAPI ?? unavailableApi
 
 // ── 配置 ──────────────────────────────────────
 export const getConfig = (): Promise<AppConfig> =>
@@ -76,6 +89,7 @@ export const openTools = () => api.send(IPC.OPEN_TOOLS)
 export const openAIChat = () => api.send(IPC.OPEN_AI_CHAT)
 export const openAgentChat = () => api.send(IPC.AGENT_OPEN_WINDOW)
 export const openSkills = () => api.send(IPC.SKILL_OPEN_WINDOW)
+export const openAgentCron = () => api.send(IPC.AGENT_CRON_OPEN_WINDOW)
 export const snoozeBreak = (minutes: number) => api.send(IPC.SNOOZE_BREAK, minutes)
 export const notifyBreakDone = () => api.send(IPC.BREAK_DONE)
 
@@ -123,6 +137,9 @@ export const searchSkills = (query: string): Promise<SkillWithState[]> =>
 
 export const toggleSkill = (id: string, enabled?: boolean): Promise<SkillWithState | null> =>
   api.invoke(IPC.SKILL_TOGGLE, { id, enabled }) as Promise<SkillWithState | null>
+
+export const updateSkillConfig = (id: string, config: SkillConfig): Promise<{ ok: boolean; skill?: SkillWithState; error?: string }> =>
+  api.invoke(IPC.SKILL_UPDATE_CONFIG, { id, config }) as Promise<{ ok: boolean; skill?: SkillWithState; error?: string }>
 
 export const installSkillFromFile = (): Promise<SkillOpResult> =>
   api.invoke(IPC.SKILL_INSTALL_FILE) as Promise<SkillOpResult>
@@ -181,3 +198,36 @@ export function useOnAgentActiveChanged(cb: (payload: { active: boolean; count: 
     return cleanup
   }, [cb])
 }
+
+// ── Agent Cron 独立管理面 ─────────────────────
+export const listAgentCrons = (): Promise<AgentCronTask[]> =>
+  api.invoke(IPC.AGENT_CRON_LIST) as Promise<AgentCronTask[]>
+
+export const listAgentCronTemplates = (): Promise<AgentCronTemplate[]> =>
+  api.invoke(IPC.AGENT_CRON_TEMPLATES) as Promise<AgentCronTemplate[]>
+
+export const saveAgentCron = (
+  cron: Partial<AgentCronTask> & { name: string },
+): Promise<{ ok: boolean; cron?: AgentCronTask; error?: string }> =>
+  api.invoke(IPC.AGENT_CRON_SAVE, cron) as Promise<{ ok: boolean; cron?: AgentCronTask; error?: string }>
+
+export const deleteAgentCron = (id: string): Promise<{ ok: boolean }> =>
+  api.invoke(IPC.AGENT_CRON_DELETE, id) as Promise<{ ok: boolean }>
+
+export const toggleAgentCron = (id: string): Promise<{ ok: boolean; cron?: AgentCronTask; error?: string }> =>
+  api.invoke(IPC.AGENT_CRON_TOGGLE, id) as Promise<{ ok: boolean; cron?: AgentCronTask; error?: string }>
+
+export const runAgentCronNow = (
+  id: string,
+): Promise<{ ok: boolean; execution?: unknown; error?: string }> =>
+  api.invoke(IPC.AGENT_CRON_RUN_NOW, id) as Promise<{ ok: boolean; execution?: unknown; error?: string }>
+
+export const migrateScheduledTasksToAgentCrons = (
+  params?: { taskIds?: string[]; disableOriginal?: boolean },
+): Promise<{ ok: boolean; migrated?: AgentCronTask[]; skipped?: Array<{ id: string; name: string; reason: string }>; error?: string }> =>
+  api.invoke(IPC.AGENT_CRON_MIGRATE, params) as Promise<{
+    ok: boolean
+    migrated?: AgentCronTask[]
+    skipped?: Array<{ id: string; name: string; reason: string }>
+    error?: string
+  }>

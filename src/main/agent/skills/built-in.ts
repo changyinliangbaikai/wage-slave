@@ -12,7 +12,7 @@
 
 import type { AgentSkill } from '@shared/types'
 
-const NOW = '2026-06-03'
+const BUILT_IN_SKILL_DATE = '2026-06-04'
 
 export const BUILT_IN_SKILLS: AgentSkill[] = [
   // ── 1. 每日复盘 ─────────────────────────────
@@ -37,7 +37,7 @@ export const BUILT_IN_SKILLS: AgentSkill[] = [
 4. 询问用户是否用 append_log 把复盘写入今日日志`,
     recommendedTools: ['get_today_log', 'get_todos', 'append_log'],
     scope: 'builtin',
-    meta: { tags: ['复盘', '总结', '日志'], createdAt: NOW, updatedAt: NOW },
+    meta: { tags: ['复盘', '总结', '日志'], createdAt: BUILT_IN_SKILL_DATE, updatedAt: BUILT_IN_SKILL_DATE },
   },
 
   // ── 2. 周报生成 ─────────────────────────────
@@ -63,7 +63,7 @@ export const BUILT_IN_SKILLS: AgentSkill[] = [
 5. 询问用户是否用 write_file 保存到文件（默认建议存到桌面）`,
     recommendedTools: ['get_logs_range', 'write_file', 'append_log'],
     scope: 'builtin',
-    meta: { tags: ['周报', '总结', '日志'], createdAt: NOW, updatedAt: NOW },
+    meta: { tags: ['周报', '总结', '日志'], createdAt: BUILT_IN_SKILL_DATE, updatedAt: BUILT_IN_SKILL_DATE },
   },
 
   // ── 3. 代码审查 ─────────────────────────────
@@ -90,7 +90,7 @@ export const BUILT_IN_SKILLS: AgentSkill[] = [
 注意：不要擅自大规模重写；改动前先说明方案`,
     recommendedTools: ['read_file', 'list_files', 'search_files', 'edit_file'],
     scope: 'builtin',
-    meta: { tags: ['代码', '审查', '重构'], createdAt: NOW, updatedAt: NOW },
+    meta: { tags: ['代码', '审查', '重构'], createdAt: BUILT_IN_SKILL_DATE, updatedAt: BUILT_IN_SKILL_DATE },
   },
 
   // ── 4. 桌面整理 ─────────────────────────────
@@ -115,10 +115,60 @@ export const BUILT_IN_SKILLS: AgentSkill[] = [
 - 你的核心价值是"给出清晰可执行的整理方案"，而非强行搬动文件`,
     recommendedTools: ['list_files', 'run_command'],
     scope: 'builtin',
-    meta: { tags: ['文件', '整理', '桌面'], createdAt: NOW, updatedAt: NOW },
+    meta: { tags: ['文件', '整理', '桌面'], createdAt: BUILT_IN_SKILL_DATE, updatedAt: BUILT_IN_SKILL_DATE },
   },
 
-  // ── 5. 会议记录整理 ─────────────────────────
+  // ── 5. 邮件助手 ─────────────────────────────
+  {
+    id: 'email-assistant',
+    name: '邮件助手',
+    description: '起草、润色和归纳邮件内容，生成清晰的主题与正文',
+    category: 'writing',
+    icon: '✉️',
+    author: '小小牛马',
+    version: '1.0.0',
+    triggers: ['写邮件', '邮件助手', '回复邮件', '邮件草稿', 'email', 'mail'],
+    systemPromptAddition: `## 当前技能：邮件助手
+执行步骤：
+1. 先识别邮件场景：通知 / 汇报 / 催办 / 致谢 / 拒绝 / 跟进
+2. 如用户提供原邮件或附件，用 read_file 读取并提炼关键信息
+3. 生成邮件主题、称呼、正文、结尾署名；语气默认专业、简洁、克制
+4. 如用户要求多版本，给出正式版 / 简短版 / 口语版
+5. 如用户要求保存，用 write_file 保存为 markdown 草稿
+重要：不要自行发送邮件；只生成草稿和回复建议`,
+    recommendedTools: ['read_file', 'write_file'],
+    scope: 'builtin',
+    meta: { tags: ['邮件', '写作', '回复'], createdAt: BUILT_IN_SKILL_DATE, updatedAt: BUILT_IN_SKILL_DATE },
+  },
+
+  // ── 6. 数据分析 ─────────────────────────────
+  {
+    id: 'data-analysis',
+    name: '数据分析',
+    description: '读取数据文件或日志，做结构化统计、趋势判断和结论输出',
+    category: 'productivity',
+    icon: '📈',
+    author: '小小牛马',
+    version: '1.0.0',
+    triggers: ['数据分析', '分析数据', '统计一下', '趋势分析', 'data analysis', 'analyze data'],
+    systemPromptAddition: `## 当前技能：数据分析
+执行步骤：
+1. 明确分析对象、口径和输出格式；缺少口径时先问一个关键问题
+2. 如数据在文件中，用 read_file 分段读取；如来自日志，用 get_logs_range 获取
+3. 提炼指标、分组、异常点、趋势与可能原因
+4. 输出结构：
+   - 数据范围与口径
+   - 关键指标
+   - 异常 / 风险
+   - 结论与建议
+5. 如用户要求保存，用 write_file 输出分析报告
+注意：不要编造没有在数据中出现的数值；不确定处明确标注`,
+    recommendedTools: ['read_file', 'get_logs_range', 'write_file'],
+    scope: 'builtin',
+    meta: { tags: ['数据', '分析', '统计'], createdAt: BUILT_IN_SKILL_DATE, updatedAt: BUILT_IN_SKILL_DATE },
+  },
+
+  // ── 7. 会议记录整理 ─────────────────────────
   {
     id: 'meeting-notes',
     name: '会议记录整理',
@@ -141,10 +191,10 @@ export const BUILT_IN_SKILLS: AgentSkill[] = [
    - 用 save_todo 把 Action Items 写入待办清单`,
     recommendedTools: ['read_file', 'write_file', 'save_todo'],
     scope: 'builtin',
-    meta: { tags: ['会议', '纪要', '待办'], createdAt: NOW, updatedAt: NOW },
+    meta: { tags: ['会议', '纪要', '待办'], createdAt: BUILT_IN_SKILL_DATE, updatedAt: BUILT_IN_SKILL_DATE },
   },
 
-  // ── 6. 文本润色 ─────────────────────────────
+  // ── 8. 文本润色 ─────────────────────────────
   {
     id: 'text-polish',
     name: '文本润色',
@@ -163,6 +213,6 @@ export const BUILT_IN_SKILLS: AgentSkill[] = [
 5. 如用户要求，用 write_file 保存或 edit_file 就地替换原文`,
     recommendedTools: ['read_file', 'write_file', 'edit_file'],
     scope: 'builtin',
-    meta: { tags: ['写作', '润色', '翻译'], createdAt: NOW, updatedAt: NOW },
+    meta: { tags: ['写作', '润色', '翻译'], createdAt: BUILT_IN_SKILL_DATE, updatedAt: BUILT_IN_SKILL_DATE },
   },
 ]

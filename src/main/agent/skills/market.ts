@@ -11,10 +11,11 @@
 import log from 'electron-log/main'
 import type { MarketSkillItem } from '@shared/types'
 
-/** 远程市场地址（占位；当前无真实服务时自动回退本地精选） */
-export const DEFAULT_MARKET_URL = 'https://skills.xiaoniuma.app/index.json'
+/** 远程市场地址：GitHub Pages 静态 JSON 索引；不可用时回退本地精选 */
+export const DEFAULT_MARKET_URL = 'https://changyinliangbaikai.github.io/wage-slave-skills/index.json'
 
 const FETCH_TIMEOUT_MS = 8_000
+const CURATED_MARKET_DATE = '2026-06-04'
 
 /**
  * 本地精选市场条目
@@ -38,7 +39,7 @@ const CURATED_MARKET: MarketSkillItem[] = [
 4. 长文本可分段翻译，保持术语一致`,
     recommendedTools: ['read_file', 'write_file'],
     scope: 'remote',
-    meta: { tags: ['翻译', '写作'], createdAt: '2026-06-03', updatedAt: '2026-06-03' },
+    meta: { tags: ['翻译', '写作'], createdAt: CURATED_MARKET_DATE, updatedAt: CURATED_MARKET_DATE },
     installs: 1280,
     rating: 4.8,
   },
@@ -59,7 +60,7 @@ const CURATED_MARKET: MarketSkillItem[] = [
 4. 如用户要求，用 write_file 保存修复结果`,
     recommendedTools: ['read_file', 'write_file', 'edit_file'],
     scope: 'remote',
-    meta: { tags: ['JSON', '代码', '格式化'], createdAt: '2026-06-03', updatedAt: '2026-06-03' },
+    meta: { tags: ['JSON', '代码', '格式化'], createdAt: CURATED_MARKET_DATE, updatedAt: CURATED_MARKET_DATE },
     installs: 960,
     rating: 4.6,
   },
@@ -82,7 +83,7 @@ const CURATED_MARKET: MarketSkillItem[] = [
 重要：只读取改动信息，不要自动执行 git commit / git push（由用户手动执行）`,
     recommendedTools: ['run_command'],
     scope: 'remote',
-    meta: { tags: ['git', '代码'], createdAt: '2026-06-03', updatedAt: '2026-06-03' },
+    meta: { tags: ['git', '代码'], createdAt: CURATED_MARKET_DATE, updatedAt: CURATED_MARKET_DATE },
     installs: 1530,
     rating: 4.9,
   },
@@ -103,7 +104,7 @@ const CURATED_MARKET: MarketSkillItem[] = [
 4. 如用户问本月花销，用 get_logs_range 汇总统计`,
     recommendedTools: ['append_log', 'write_file', 'get_logs_range'],
     scope: 'remote',
-    meta: { tags: ['记账', '生产力'], createdAt: '2026-06-03', updatedAt: '2026-06-03' },
+    meta: { tags: ['记账', '生产力'], createdAt: CURATED_MARKET_DATE, updatedAt: CURATED_MARKET_DATE },
     installs: 740,
     rating: 4.5,
   },

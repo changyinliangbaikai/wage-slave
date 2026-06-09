@@ -6,7 +6,7 @@
  * - 执行日志存储与管理
  */
 
-import { app, BrowserWindow, Notification } from 'electron'
+import { app, BrowserWindow, Notification, powerMonitor } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
@@ -56,6 +56,7 @@ let schedulerInterval: NodeJS.Timeout | null = null
 const WEEK_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 // 记录调度引擎启动时间，用于跳过启动前已错过的任务
 let schedulerStartTime: Date | null = null
+let powerResumeRegistered = false
 // 启动期内"已错过并打印过跳过日志"的任务 ID，避免每 30s 重复刷屏
 const loggedSkippedTaskIds = new Set<string>()
 
@@ -73,6 +74,23 @@ function broadcastTasksChanged(action: 'create' | 'update' | 'delete' | 'toggle'
     }
   } catch (err) {
     console.warn('[TaskScheduler] 广播任务列表变化失败:', err)
+  }
+}
+
+/** Agent 定时任务完成后，同时推送给小猫气泡窗口 */
+function broadcastAgentCronResult(taskName: string, status: 'success' | 'failed', body: string): void {
+  try {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) {
+        win.webContents.send(IPC.AGENT_NOTIFICATION, {
+          title: status === 'success' ? `Agent 定时完成：${taskName}` : `Agent 定时失败：${taskName}`,
+          body: body.slice(0, 200),
+          type: 'cron-result',
+        })
+      }
+    }
+  } catch (err) {
+    console.warn('[TaskScheduler] 广播 Agent 定时结果失败:', err)
   }
 }
 
@@ -119,6 +137,7 @@ export function saveTask(task: Partial<ScheduledTask> & { name: string }): Sched
     updatedAt: now,
     ...(task.kind && { kind: task.kind }),
     ...(task.agentTask && { agentTask: task.agentTask }),
+    ...(task.agentCron && { agentCron: task.agentCron }),
   }
 
   tasks.push(newTask)
@@ -334,13 +353,7 @@ export function runTask(taskId: string): TaskExecution {
     // fire-and-forget：内部通过 updateLog 完成所有副作用
     runAgentTask(task, executionId).catch(err => {
       console.error(`[TaskScheduler] Agent 任务异常: ${task.name}`, err)
-      updateLog(taskId, executionId, {
-        endTime: new Date().toISOString(),
-        exitCode: -1,
-        output: `[ERROR] ${err instanceof Error ? err.message : String(err)}`,
-        status: 'failed',
-      })
-      updateTaskRunStatus(taskId, 'failed')
+      failAgentExecution(task, executionId, err instanceof Error ? err.message : String(err))
     })
   } else {
     runShellTask(task, executionId)
@@ -440,6 +453,28 @@ function runShellTask(task: ScheduledTask, executionId: string): void {
   })
 }
 
+function failAgentExecution(task: ScheduledTask, executionId: string, error: string): void {
+  const taskId = task.id
+  updateLog(taskId, executionId, {
+    endTime: new Date().toISOString(),
+    exitCode: -1,
+    output: `[ERROR] ${error}`,
+    status: 'failed',
+  })
+  updateTaskRunStatus(taskId, 'failed')
+  executionToTask.delete(executionId)
+  broadcastAgentCronResult(task.name, 'failed', error)
+
+  try {
+    new Notification({
+      title: 'Agent 定时失败',
+      body: `${task.name}：${error}`,
+    }).show()
+  } catch {
+    // 通知可能在某些环境不可用
+  }
+}
+
 /**
  * 执行 Agent 任务
  * 静默调用 AgentOrchestrator，把工具调用与最终回复汇总成可读 Markdown 写入 output
@@ -449,26 +484,14 @@ async function runAgentTask(task: ScheduledTask, executionId: string): Promise<v
   const taskId = task.id
   const userInput = task.agentTask?.userInput?.trim()
   if (!userInput) {
-    updateLog(taskId, executionId, {
-      endTime: new Date().toISOString(),
-      exitCode: -1,
-      output: '[ERROR] Agent 任务缺少 userInput',
-      status: 'failed',
-    })
-    updateTaskRunStatus(taskId, 'failed')
+    failAgentExecution(task, executionId, 'Agent 任务缺少 userInput')
     console.error(`[TaskScheduler] Agent 任务缺少 userInput: ${task.name}`)
     return
   }
 
   const apiKey = await getStoredApiKey()
   if (!apiKey) {
-    updateLog(taskId, executionId, {
-      endTime: new Date().toISOString(),
-      exitCode: -1,
-      output: '[ERROR] 未配置 LLM API Key，请先在设置中保存',
-      status: 'failed',
-    })
-    updateTaskRunStatus(taskId, 'failed')
+    failAgentExecution(task, executionId, '未配置 LLM API Key，请先在设置中保存')
     console.error(`[TaskScheduler] Agent 任务无 API Key: ${task.name}`)
     return
   }
@@ -476,6 +499,7 @@ async function runAgentTask(task: ScheduledTask, executionId: string): Promise<v
   // 每次定时触发都用独立 sessionId，便于历史追溯
   const sessionId = `agent-cron-${executionId}`
   const orchestrator = new AgentOrchestrator(sessionId)
+  const timeoutMinutes = task.agentCron?.timeoutMinutes
   runningAgents.set(executionId, orchestrator)
   // 标记 Agent 进入活跃态（小猫切 busy 动画的源头）
   agentActivityStarted('cron')
@@ -491,6 +515,8 @@ async function runAgentTask(task: ScheduledTask, executionId: string): Promise<v
       userInput,
       apiKey,
       history: [],
+      maxIterations: task.agentCron?.maxSteps,
+      timeoutMs: timeoutMinutes ? timeoutMinutes * 60 * 1000 : undefined,
       callbacks: {
         // chunk 不记录详细文本以免占爆 output；只在 onDone 取最终内容
         onChunk: () => {},
@@ -500,8 +526,10 @@ async function runAgentTask(task: ScheduledTask, executionId: string): Promise<v
           // 用户主动中断：orchestrator 走 onDone 上报，这里识别 aborted 标记并视为失败
           // 否则上层会判定为 success，导致 UI 显示 ✅、通知"成功"
           if (p.aborted) {
-            errorText = '用户中断'
-            console.log(`[TaskScheduler] Agent 任务被用户中断: ${task.name}`)
+            errorText = p.abortReason === 'timeout'
+              ? `任务超时${timeoutMinutes ? `（${timeoutMinutes} 分钟）` : ''}`
+              : '用户中断'
+            console.log(`[TaskScheduler] Agent 任务中断: ${task.name}, reason=${p.abortReason ?? 'user'}`)
           }
         },
         onError: p => {
@@ -564,6 +592,11 @@ async function runAgentTask(task: ScheduledTask, executionId: string): Promise<v
   updateTaskRunStatus(taskId, status)
 
   console.log(`[TaskScheduler] Agent 任务完成: ${task.name} status=${status}`)
+  broadcastAgentCronResult(
+    task.name,
+    status,
+    status === 'success' ? (finalContent || '已完成') : (errorText ?? '执行失败'),
+  )
 
   // 系统通知（与 shell 任务一致）
   try {
@@ -686,14 +719,23 @@ function checkTasks(): void {
   }
 }
 
+function handlePowerResume(): void {
+  setTimeout(checkTasks, 2000)
+}
+
 /** 启动调度引擎 */
 export function startTaskScheduler(): void {
+  if (schedulerInterval) return
   schedulerStartTime = new Date()
   // 清空上次启动期的"已跳过"标记，本次重新判断
   loggedSkippedTaskIds.clear()
   console.log(`[TaskScheduler] 调度引擎已启动，启动时间: ${schedulerStartTime.toLocaleTimeString()}`)
   // 每 30 秒检查一次
   schedulerInterval = setInterval(checkTasks, 30 * 1000)
+  if (!powerResumeRegistered) {
+    powerMonitor.on('resume', handlePowerResume)
+    powerResumeRegistered = true
+  }
   // 启动后延迟 5 秒开始首次检查
   setTimeout(checkTasks, 5000)
 }
@@ -703,6 +745,10 @@ export function stopTaskScheduler(): void {
   if (schedulerInterval) {
     clearInterval(schedulerInterval)
     schedulerInterval = null
+  }
+  if (powerResumeRegistered) {
+    powerMonitor.off('resume', handlePowerResume)
+    powerResumeRegistered = false
   }
   // 终止所有运行中的进程
   for (const [id, child] of runningProcesses) {

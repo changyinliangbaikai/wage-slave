@@ -2,7 +2,7 @@
 
 本文档记录小小牛马的版本更新历史。
 
-## [2.1.0] - 2026-06-03
+## [2.1.0] - 2026-06-04
 
 ### 新增功能
 - **Agent 系统**
@@ -12,21 +12,28 @@
   - 新增 Agent 会话管理，支持创建、删除、重命名会话
   - 新增 Agent 上下文压缩，自动摘要历史消息避免 token 爆炸
 
-- **Agent Cron（定时任务升级）**
-  - 定时任务新增「Agent 任务」类型，支持在时间触发后让 Agent 自主规划和执行
+- **Agent Cron**
+  - 新增独立 Agent Cron 模块，使用 `{userData}/agent-cron/tasks.json` 持久化并独立调度
+  - 支持在时间触发后让 Agent 自主规划和执行
   - 新增自然语言解析，输入"每天早上 8 点提醒我喝水"自动生成任务草稿
   - 新增 Agent 任务模板，快速创建常见任务（晨间问候、工作总结等）
-  - Agent 执行 scheduler_* 工具后立即广播事件，UI 自动刷新
+  - 支持旧定时任务一键迁移到 Agent Cron，可选择保留或停用原任务，重复迁移会自动跳过已迁移任务
+  - Agent Cron 执行后广播事件，UI 自动刷新
 
 - **安全增强**
   - 命令黑名单升级，阻止 crontab、launchctl、systemd-run 等系统调度命令
   - 新增用户二次确认机制，危险命令需用户确认后执行
   - 新增 Agent 工具权限开关，用户可在设置页按组启用/禁用工具
+  - 新增 Agent 路径白名单扩展，用户可在设置页添加额外允许访问目录
   - 新增 Agent 专用模型配置，可独立配置 API URL 和模型名称
+  - 新增写入类工具审计日志，记录到 `{userData}/agent-audit/YYYY-MM-DD.jsonl`
 
 - **体验优化**
   - Agent 运行时小猫自动切换 busy 动画
   - Agent 任务执行状态实时更新，UI 显示执行进度
+  - Agent 工具调用卡片显示只读 / 写入 / 敏感安全级别
+  - Skill 市场支持搜索、分类筛选、详情查看和一键安装
+  - 已安装 Skill 支持 JSON 配置，配置会随 Skill Prompt 注入 Agent
   - 修复 Agent 任务 abort 误判为成功的问题
 
 ### 改进
@@ -34,6 +41,7 @@
 - 新增 Agent 全局活跃状态追踪，用于驱动 UI 动画
 - 优化定时任务日志编码，解决跨平台中文乱码问题
 - 新增 Agent 活跃状态 IPC 通道，主进程向渲染进程广播状态变化
+- 新增 AgentSettings、SkillManager、SkillMarket 独立组件，匹配 Agent 模块化 UI 结构
 
 ### 技术栈
 - Electron 29

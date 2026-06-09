@@ -28,6 +28,13 @@ const EXCLUDE_PATHS = [
 
 const BASE_DIR = () => app.getPath('userData')
 
+function localDateStr(d: Date = new Date()): string {
+  const year = d.getFullYear()
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 /** 判断 relPath 是否落在排除集合下 */
 function isExcluded(relPath: string): boolean {
   return EXCLUDE_PATHS.some(ex => relPath === ex || relPath.startsWith(ex + path.sep))
@@ -53,7 +60,7 @@ function addDirToZip(zip: JSZip, absDir: string, relBase: string): void {
 
 /** 导出：打包 userData 关键数据 → zip */
 async function exportBackup(): Promise<{ ok: boolean; filePath?: string; reason?: string }> {
-  const defaultName = `xiaoniu-backup-${new Date().toISOString().slice(0, 10)}.zip`
+  const defaultName = `xiaoniu-backup-${localDateStr()}.zip`
   const result = await dialog.showSaveDialog({
     title: '导出小小牛马数据备份',
     defaultPath: defaultName,
@@ -200,7 +207,7 @@ async function saveMarkdown(opts: { content: string; suggestedName?: string }): 
     if (!content?.trim()) return { ok: false, reason: 'empty-content' }
     const reportsDir = path.join(BASE_DIR(), 'reports')
     if (!fs.existsSync(reportsDir)) fs.mkdirSync(reportsDir, { recursive: true })
-    const stamp = new Date().toISOString().slice(0, 10)
+    const stamp = localDateStr()
     const safeName = (suggestedName || `小牛马-${stamp}`).replace(/[\\/:*?"<>|]/g, '-').slice(0, 80)
     const defaultPath = path.join(reportsDir, `${safeName}.md`)
 

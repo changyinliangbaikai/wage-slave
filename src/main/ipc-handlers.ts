@@ -14,7 +14,7 @@ import {
   getTodos, saveTodos,
   getLogsInRange, todayStr,
 } from './store'
-import { openSettingsWindow, showMainWindow, openLogWindow, openToolWindow, openAIChatWindow, getAIChatWindow, openAgentChatWindow, getAgentChatWindow, openSkillsWindow, getSkillsWindow } from './windows'
+import { openSettingsWindow, showMainWindow, openLogWindow, openToolWindow, openAIChatWindow, getAIChatWindow, openAgentChatWindow, getAgentChatWindow, openSkillsWindow, getSkillsWindow, openAgentCronWindow } from './windows'
 import { snoozeBreak, resetContinuousTime } from './activity-monitor'
 import { parsePlan, generateSummary } from './llm-service'
 import { startChat as startAIChat, abortChat as abortAIChat } from './ai-chat-service'
@@ -33,10 +33,20 @@ import {
   getSkillById,
   searchSkills,
   toggleSkill,
+  updateSkillConfig,
   deleteUserSkill,
 } from './agent/skills/store'
-import { installFromFile, installFromUrl, installSkillObject } from './agent/skills/installer'
+import { installFromFile, installFromUrl, installSkillObject, installFromZip } from './agent/skills/installer'
 import { fetchMarketSkills, getMarketSkill } from './agent/skills/market'
+import { AGENT_CRON_TEMPLATES } from './agent/cron/built-in-templates'
+import {
+  deleteAgentCron,
+  listAgentCrons,
+  runAgentCronNow,
+  saveAgentCron,
+  toggleAgentCron,
+} from './agent/cron/scheduler'
+import { migrateScheduledTasksToAgentCrons } from './agent/cron/migration'
 import {
   listSessions as listChatSessions,
   getSession as getChatSession,
@@ -50,7 +60,7 @@ import { exportSummaryDocx } from './docx-export'
 import { getMainWindow } from './windows'
 import type {
   AppConfig, DailyLog, TodoItem, AIChatRequest, AIChatSession,
-  AgentSession,
+  AgentSession, SkillConfig,
 } from '@shared/types'
 
 // ── 尝试加载 keytar（安全存储 API Key）──────────
@@ -450,6 +460,9 @@ export function registerIPCHandlers(): void {
 
   // ── Agent Skill 系统（Phase 2） ───────────────
   registerSkillIPC()
+
+  // ── Agent Cron（Phase 3 独立入口）─────────────
+  registerAgentCronIPC()
 }
 
 /**
@@ -590,14 +603,16 @@ function registerSkillIPC(): void {
   // ── Agent 安全策略（D.3） ───────────────────────
   ipcMain.handle(IPC.AGENT_GET_SECURITY_POLICY, () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getAllowedPaths, DANGEROUS_RULES } = require('./agent/security') as typeof import('./agent/security')
+    const { getAllowedPaths, getDefaultAllowedPaths, DANGEROUS_RULES } = require('./agent/security') as typeof import('./agent/security')
     const allowedPaths = getAllowedPaths()
+    const defaultAllowedPaths = getDefaultAllowedPaths()
+    const customAllowedPaths = getConfig().agent_allowed_paths_extra ?? []
     // 提取命令黑名单的正则描述（转换为字符串用于展示）
     const commandBlacklist = DANGEROUS_RULES.map((rule: { pattern: RegExp; reason: string }) => ({
       pattern: rule.pattern.toString(),
       reason: rule.reason,
     }))
-    return { allowedPaths, commandBlacklist }
+    return { allowedPaths, defaultAllowedPaths, customAllowedPaths, commandBlacklist }
   })
 
   // 查询类
@@ -612,18 +627,33 @@ function registerSkillIPC(): void {
     return result
   })
 
-  // 从本地文件安装（弹系统文件选择框）
+  ipcMain.handle(IPC.SKILL_UPDATE_CONFIG, (_e, params: { id: string; config: SkillConfig }) => {
+    try {
+      const result = updateSkillConfig(params.id, params.config)
+      notifyChanged()
+      return { ok: Boolean(result), skill: result ?? undefined }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      log.warn('[IPC] 保存 skill 配置失败:', msg)
+      return { ok: false, error: msg }
+    }
+  })
+
+  // 从本地文件安装（支持 skill.json、包含 skill.json 的目录、zip 包）
   ipcMain.handle(IPC.SKILL_INSTALL_FILE, async () => {
     const result = await dialog.showOpenDialog({
-      title: '选择 skill.json',
-      properties: ['openFile'],
-      filters: [{ name: 'Skill', extensions: ['json'] }],
+      title: '选择 skill.json、Skill 目录或 zip 包',
+      properties: ['openFile', 'openDirectory'],
+      filters: [{ name: 'Skill', extensions: ['json', 'zip'] }],
     })
     if (result.canceled || result.filePaths.length === 0) {
       return { ok: false, canceled: true }
     }
     try {
-      const skill = installFromFile(result.filePaths[0])
+      const selected = result.filePaths[0]
+      const skill = path.extname(selected).toLowerCase() === '.zip'
+        ? await installFromZip(selected)
+        : installFromFile(selected)
       notifyChanged()
       log.info('[IPC] 已安装本地 skill:', skill.id)
       return { ok: true, skill }
@@ -653,9 +683,11 @@ function registerSkillIPC(): void {
     try {
       const item = await getMarketSkill(id)
       if (!item) return { ok: false, error: '市场中未找到该技能' }
-      const skill = installSkillObject(item, 'remote')
+      const skill = item.downloadUrl
+        ? await installFromUrl(item.downloadUrl)
+        : installSkillObject(item, 'remote')
       notifyChanged()
-      log.info('[IPC] 已从市场安装 skill:', id)
+      log.info('[IPC] 已从市场安装 skill:', skill.id)
       return { ok: true, skill }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -679,6 +711,38 @@ function registerSkillIPC(): void {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       return { ok: false, error: msg, skills: [] }
+    }
+  })
+}
+
+function registerAgentCronIPC(): void {
+  ipcMain.on(IPC.AGENT_CRON_OPEN_WINDOW, () => openAgentCronWindow())
+  ipcMain.handle(IPC.AGENT_CRON_LIST, () => listAgentCrons())
+  ipcMain.handle(IPC.AGENT_CRON_TEMPLATES, () => AGENT_CRON_TEMPLATES)
+  ipcMain.handle(IPC.AGENT_CRON_SAVE, (_e, cron) => {
+    try {
+      return { ok: true, cron: saveAgentCron(cron) }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+  ipcMain.handle(IPC.AGENT_CRON_DELETE, (_e, id: string) => ({ ok: deleteAgentCron(id) }))
+  ipcMain.handle(IPC.AGENT_CRON_TOGGLE, (_e, id: string) => {
+    const cron = toggleAgentCron(id)
+    return cron ? { ok: true, cron } : { ok: false, error: '任务不存在' }
+  })
+  ipcMain.handle(IPC.AGENT_CRON_RUN_NOW, (_e, id: string) => {
+    try {
+      return { ok: true, execution: runAgentCronNow(id) }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  })
+  ipcMain.handle(IPC.AGENT_CRON_MIGRATE, (_e, params?: { taskIds?: string[]; disableOriginal?: boolean }) => {
+    try {
+      return { ok: true, ...migrateScheduledTasksToAgentCrons(params) }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
   })
 }

@@ -14,12 +14,13 @@
 import { app, BrowserWindow, dialog } from 'electron'
 import * as os from 'os'
 import * as path from 'path'
+import { getConfig } from '../store'
 
 /**
  * 获取 Agent 允许访问的路径白名单（绝对路径前缀）
  * 校验时只要 resolve 后的目标以白名单中任一前缀开头即可放行
  */
-export function getAllowedPaths(): string[] {
+export function getDefaultAllowedPaths(): string[] {
   const home = os.homedir()
   const userData = app.getPath('userData')
   const tempDir = app.getPath('temp')
@@ -49,7 +50,20 @@ export function getAllowedPaths(): string[] {
     allowed.push('/var/tmp')
   }
 
-  return allowed
+  return normalizeAllowedPaths(allowed)
+}
+
+export function getAllowedPaths(): string[] {
+  const custom = getConfig().agent_allowed_paths_extra ?? []
+  return normalizeAllowedPaths([...getDefaultAllowedPaths(), ...custom])
+}
+
+function normalizeAllowedPaths(paths: string[]): string[] {
+  const normalized = paths
+    .map(p => typeof p === 'string' ? p.trim() : '')
+    .filter(Boolean)
+    .map(p => path.resolve(expandHome(p)))
+  return Array.from(new Set(normalized))
 }
 
 /**

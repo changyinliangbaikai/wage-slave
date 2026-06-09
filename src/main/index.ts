@@ -94,6 +94,13 @@ app.whenReady().then(() => {
     console.error('[Main] 定时任务调度器启动失败:', err)
   })
 
+  // 启动 Agent Cron 独立调度引擎
+  import('./agent/cron/scheduler').then(({ startAgentCronScheduler }) => {
+    startAgentCronScheduler()
+  }).catch(err => {
+    console.error('[Main] Agent Cron 调度器启动失败:', err)
+  })
+
   // 注册 AI 对话的全局快捷键
   registerAIChatHotkey()
 
