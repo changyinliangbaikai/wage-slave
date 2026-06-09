@@ -15,6 +15,7 @@ export function AgentSettings({
   onChange,
 }: AgentSettingsProps) {
   const [newAllowedPath, setNewAllowedPath] = useState('')
+  const [showAllBlacklist, setShowAllBlacklist] = useState(false)
   const customAllowedPaths = config.agent_allowed_paths_extra ?? []
 
   const setCustomAllowedPaths = (paths: string[]) => {
@@ -147,10 +148,10 @@ export function AgentSettings({
               <label style={{ paddingTop: 4 }}>命令黑名单</label>
               <div style={{ flex: 1, maxWidth: 240, display: 'flex', flexDirection: 'column', gap: 4 }}>
                 <div style={{ fontSize: 11, color: '#8a7e5e', lineHeight: 1.4 }}>
-                  以下命令被禁止执行：
+                  以下命令被禁止执行（共 {securityPolicy.commandBlacklist.length} 条）：
                 </div>
                 <ul style={{ fontSize: 10, color: '#8a7e5e', margin: 0, paddingLeft: 16, lineHeight: 1.6 }}>
-                  {securityPolicy.commandBlacklist.map((rule, idx) => (
+                  {(showAllBlacklist ? securityPolicy.commandBlacklist : securityPolicy.commandBlacklist.slice(0, 3)).map((rule, idx) => (
                     <li key={idx}>
                       <code style={{ fontSize: 9, background: '#f5f5f5', padding: '1px 3px', borderRadius: 2 }}>
                         {rule.pattern}
@@ -159,6 +160,24 @@ export function AgentSettings({
                     </li>
                   ))}
                 </ul>
+                {securityPolicy.commandBlacklist.length > 3 && (
+                  <button
+                    onClick={() => setShowAllBlacklist(!showAllBlacklist)}
+                    style={{
+                      fontSize: 11,
+                      color: '#8a7e5e',
+                      background: 'none',
+                      border: '1px solid #ddd',
+                      borderRadius: 4,
+                      padding: '4px 8px',
+                      cursor: 'pointer',
+                      marginTop: 4,
+                      alignSelf: 'flex-start',
+                    }}
+                  >
+                    {showAllBlacklist ? '收起 ▲' : `展开全部 ${securityPolicy.commandBlacklist.length - 3} 条 ▼`}
+                  </button>
+                )}
               </div>
             </div>
           </>

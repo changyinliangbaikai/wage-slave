@@ -47,6 +47,8 @@ import {
   toggleAgentCron,
 } from './agent/cron/scheduler'
 import { migrateScheduledTasksToAgentCrons } from './agent/cron/migration'
+import { AGENT_TOOL_GROUPS } from './agent/tool-registry'
+import { getAllowedPaths, getDefaultAllowedPaths, DANGEROUS_RULES } from './agent/security'
 import {
   listSessions as listChatSessions,
   getSession as getChatSession,
@@ -595,20 +597,16 @@ function registerSkillIPC(): void {
 
   // ── Agent 工具权限（D.1） ───────────────────────
   ipcMain.handle(IPC.AGENT_GET_TOOL_GROUPS, () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { AGENT_TOOL_GROUPS } = require('./agent/tool-registry') as typeof import('./agent/tool-registry')
     return AGENT_TOOL_GROUPS
   })
 
   // ── Agent 安全策略（D.3） ───────────────────────
   ipcMain.handle(IPC.AGENT_GET_SECURITY_POLICY, () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getAllowedPaths, getDefaultAllowedPaths, DANGEROUS_RULES } = require('./agent/security') as typeof import('./agent/security')
     const allowedPaths = getAllowedPaths()
     const defaultAllowedPaths = getDefaultAllowedPaths()
     const customAllowedPaths = getConfig().agent_allowed_paths_extra ?? []
     // 提取命令黑名单的正则描述（转换为字符串用于展示）
-    const commandBlacklist = DANGEROUS_RULES.map((rule: { pattern: RegExp; reason: string }) => ({
+    const commandBlacklist = DANGEROUS_RULES.map((rule) => ({
       pattern: rule.pattern.toString(),
       reason: rule.reason,
     }))
