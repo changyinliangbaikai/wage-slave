@@ -219,6 +219,7 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
 
         // 3) tool_calls（按 index 增量累积）
         if (Array.isArray(delta.tool_calls)) {
+          log.info(`[AgentLLM] 收到 tool_calls chunk: ${delta.tool_calls.length} 个`)
           for (const tc of delta.tool_calls) {
             const idx = tc.index ?? 0
             const buf = toolBuffer.get(idx) ?? { id: '', name: '', arguments: '' }
@@ -396,6 +397,7 @@ async function streamLLMReactFallback(params: StreamLLMParams, originalError: st
   if (tail.reasoning) fullReasoning += tail.reasoning
   if (tail.content) fullContent += tail.content
 
+  log.info(`[AgentLLM] ReAct 原始响应内容（前500字）: ${fullContent.slice(0, 500)}`)
   const parsed = parseFallbackToolCalls(fullContent)
   log.info(`[AgentLLM] ReAct 降级完成 finish=${finishReason ?? 'null'} content=${parsed.content.length}字 toolCalls=${parsed.toolCalls.length}`)
   return {
@@ -417,7 +419,7 @@ function injectFallbackProtocol(
     description: t.function.description,
     parameters: t.function.parameters,
   }))
-  const protocol = `\n\n# 工具调用降级协议\n\n当前模型或 API 不支持 OpenAI tool_calls（原始错误：${originalError.slice(0, 160)}）。\n如果需要调用工具，只输出一个或多个工具标签，每个标签一行：\n<tool_call>{"name":"工具名","arguments":{}}</tool_call>\n\n规则：\n- name 必须来自下方工具列表\n- arguments 必须是 JSON 对象\n- 需要工具时不要编造最终结果，先输出 tool_call 标签等待工具结果\n- 不需要工具时正常回复，不要输出 tool_call 标签\n\n可用工具：\n${JSON.stringify(toolList, null, 2)}`
+  const protocol = `\n\n# 工具调用降级协议\n\n当前模型或 API 不支持 OpenAI tool_calls（原始错误：${originalError.slice(0, 160)}）。\n如果需要调用工具，请使用以下格式之一：\n\n格式1 - XML标签（推荐）：\n<tool_call>{"name":"工具名","arguments":{"参数名":"值"}}</tool_call>\n\n格式2 - Markdown代码块：\n\`\`\`json\n{"name":"工具名","arguments":{"参数名":"值"}}\n\`\`\`\n\n规则：\n- name 必须来自下方工具列表\n- arguments 必须是 JSON 对象\n- 需要工具时不要编造最终结果，先输出工具调用等待执行结果\n- 不需要工具时正常回复，不要输出工具调用格式\n- 如果需要调用多个工具，请依次输出多个标签\n\n示例（读取文件）：\n<tool_call>{"name":"read_file","arguments":{"path":"/Users/jhx/Desktop/test.txt"}}</tool_call>\n\n可用工具：\n${JSON.stringify(toolList, null, 2)}`
 
   const normalizedMessages = normalizeMessagesForReactFallback(messages)
   const [first, ...rest] = normalizedMessages
@@ -461,33 +463,74 @@ function normalizeMessagesForReactFallback(messages: StreamLLMParams['messages']
 
 function parseFallbackToolCalls(rawContent: string): { content: string; toolCalls: AgentToolCall[] } {
   const toolCalls: AgentToolCall[] = []
+  let idx = 0
+  let cleanedContent = rawContent
+
+  // 1) 解析 <tool_call> 标签格式
   const tagPattern = /<tool_call>([\s\S]*?)<\/tool_call>/gi
   let match: RegExpExecArray | null
-  let idx = 0
   while ((match = tagPattern.exec(rawContent)) !== null) {
     try {
       const parsed = JSON.parse(match[1].trim()) as { name?: unknown; arguments?: unknown }
-      if (typeof parsed.name !== 'string' || !parsed.name.trim()) continue
-      const args = parsed.arguments && typeof parsed.arguments === 'object'
-        ? parsed.arguments as Record<string, unknown>
-        : {}
-      toolCalls.push({
-        id: `react_${Date.now()}_${idx++}`,
-        name: parsed.name,
-        arguments: args,
-      })
+      const tc = extractToolCall(parsed, `react_tag_${Date.now()}_${idx++}`)
+      if (tc) toolCalls.push(tc)
     } catch (e) {
-      log.warn('[AgentLLM] ReAct 工具标签解析失败:', e)
+      log.warn('[AgentLLM] ReAct <tool_call> 标签解析失败:', e)
     }
   }
+  cleanedContent = cleanedContent.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+
+  // 2) 解析 Markdown 代码块中的 JSON（支持 ```json 和 ``` 两种）
+  const codeBlockPattern = /```(?:json)?\s*\n?([\s\S]*?)```/gi
+  while ((match = codeBlockPattern.exec(rawContent)) !== null) {
+    try {
+      const parsed = JSON.parse(match[1].trim()) as unknown
+      // 可能是单个工具调用或数组
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          const tc = extractToolCall(item as Record<string, unknown>, `react_block_${Date.now()}_${idx++}`)
+          if (tc) toolCalls.push(tc)
+        }
+      } else if (typeof parsed === 'object' && parsed !== null) {
+        const tc = extractToolCall(parsed as Record<string, unknown>, `react_block_${Date.now()}_${idx++}`)
+        if (tc) toolCalls.push(tc)
+      }
+    } catch (e) {
+      // 静默忽略非 JSON 代码块
+    }
+  }
+  cleanedContent = cleanedContent.replace(/```(?:json)?\s*\n?[\s\S]*?```/gi, '')
+
+  log.info(`[AgentLLM] ReAct 解析完成: 找到 ${toolCalls.length} 个工具调用`)
   return {
-    content: stripFallbackToolTags(rawContent).trim(),
+    content: cleanedContent.trim(),
     toolCalls,
   }
 }
 
+/**
+ * 从解析的对象中提取工具调用信息，支持多种字段命名
+ */
+function extractToolCall(parsed: Record<string, unknown>, id: string): AgentToolCall | null {
+  // 支持多种字段名: name/function/tool, arguments/args/parameters/params
+  const name = (parsed.name ?? parsed.function ?? parsed.tool) as string | undefined
+  if (typeof name !== 'string' || !name.trim()) return null
+
+  let args: Record<string, unknown> = {}
+  const rawArgs = parsed.arguments ?? parsed.args ?? parsed.parameters ?? parsed.params
+  if (rawArgs && typeof rawArgs === 'object') {
+    args = rawArgs as Record<string, unknown>
+  }
+
+  return { id, name: name.trim(), arguments: args }
+}
+
 function stripFallbackToolTags(content: string): string {
-  return content.replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '').trim()
+  // 同时移除 <tool_call> 标签和代码块
+  return content
+    .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, '')
+    .replace(/```(?:json)?\s*\n?[\s\S]*?```/gi, '')
+    .trim()
 }
 
 function isToolUnsupportedError(status: number, text: string): boolean {

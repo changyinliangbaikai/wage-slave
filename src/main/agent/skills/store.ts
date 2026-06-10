@@ -6,13 +6,23 @@
  *     installs.json      // 安装/启停记录（含内置 skill 的启停覆盖）
  *     user/              // 用户安装的 skill，每个一个 <id>.json
  *
+ * 全局 skills（跨项目共享）：
+ *   ~/.devin/skills/     // 本机全局 skill 目录
+ *   ~/.agents/skills/    // 备用全局 skill 目录
+ *   支持格式：
+ *     - 小牛马原生格式：<id>.json 直接放在目录下
+ *     - 通用 skill 标准：<skill-dir>/SKILL.md（YAML frontmatter + Markdown）
+ *
  * 设计：
  *  - 内置 skill 来自 built-in.ts，恒为"已安装"，启停状态可被 installs.json 覆盖
+ *  - 全局 skill 来自 ~/.devin/skills/ 和 ~/.agents/skills/，跨项目共享
  *  - 用户 / 远程 skill 落地为 user/<id>.json
+ *  - 优先级：用户 > 全局 > 内置（同 id 后者覆盖前者）
  *  - 原子写入（写 .tmp 再 rename），避免半写损坏
  */
 
 import * as fs from 'fs'
+import * as os from 'os'
 import * as path from 'path'
 import { app } from 'electron'
 import log from 'electron-log/main'
@@ -22,6 +32,12 @@ import { BUILT_IN_SKILLS } from './built-in'
 const SKILLS_DIR = path.join(app.getPath('userData'), 'skills')
 const INSTALLS_FILE = path.join(SKILLS_DIR, 'installs.json')
 const USER_SKILLS_DIR = path.join(SKILLS_DIR, 'user')
+
+// 全局 skills 目录（跨项目共享）
+const GLOBAL_SKILLS_DIRS = [
+  path.join(os.homedir(), '.devin', 'skills'),
+  path.join(os.homedir(), '.agents', 'skills'),
+]
 
 // ── 目录初始化 ─────────────────────────────────
 
@@ -93,6 +109,126 @@ export function loadUserSkills(): AgentSkill[] {
   return result
 }
 
+/** 从 SKILL.md 内容解析 skill
+ * 格式: YAML frontmatter + Markdown body
+ * frontmatter 包含: name, description, (可选) triggers, category, icon, author, version
+ */
+function parseSkillFromMarkdown(
+  content: string,
+  skillId: string,
+  skillDir: string,
+): AgentSkill | null {
+  // 解析 YAML frontmatter: ---\n...\n---\n
+  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
+  if (!frontmatterMatch) {
+    log.warn(`[Skill] ${skillId} 的 SKILL.md 缺少 YAML frontmatter`)
+    return null
+  }
+
+  const [, yamlContent, markdownBody] = frontmatterMatch
+
+  // 简单解析 YAML key: value 格式
+  const yaml: Record<string, string | string[]> = {}
+  for (const line of yamlContent.split('\n')) {
+    const match = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/)
+    if (match) {
+      const [, key, value] = match
+      // 处理数组格式 (以 - 开头)
+      if (value.trim().startsWith('- ')) {
+        yaml[key] = value
+          .trim()
+          .split('\n')
+          .map((v) => v.trim().replace(/^- /, ''))
+          .filter(Boolean)
+      } else {
+        yaml[key] = value.trim()
+      }
+    }
+  }
+
+  const name = (yaml.name as string) || skillId
+  const description = (yaml.description as string) || ''
+  const triggers = Array.isArray(yaml.triggers)
+    ? yaml.triggers
+    : typeof yaml.triggers === 'string'
+      ? yaml.triggers.split(',').map((t) => t.trim())
+      : [skillId, name]
+
+  // 构建 AgentSkill 对象
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  const skill: AgentSkill = {
+    id: skillId,
+    name,
+    description,
+    category: (yaml.category as AgentSkill['category']) || 'custom',
+    icon: (yaml.icon as string) || '🔧',
+    author: (yaml.author as string) || 'unknown',
+    version: (yaml.version as string) || '1.0.0',
+    triggers,
+    systemPromptAddition: `## 当前技能：${name}\n\n${markdownBody.trim()}`,
+    scope: 'user',
+  }
+
+  return skill
+}
+
+/** 加载全局 skills 目录 (~/.devin/skills/ 和 ~/.agents/skills/) 下的 skill
+ * 支持格式：
+ * 1. 直接放在目录下的 <id>.json 文件（小牛马原生格式）
+ * 2. 子目录形式：<skill-dir>/SKILL.md（通用 skill 标准）
+ */
+export function loadGlobalSkills(): AgentSkill[] {
+  const result: AgentSkill[] = []
+  for (const dir of GLOBAL_SKILLS_DIRS) {
+    try {
+      if (!fs.existsSync(dir)) {
+        continue
+      }
+      const entries = fs.readdirSync(dir, { withFileTypes: true })
+
+      for (const entry of entries) {
+        try {
+          // 格式1: 直接放在目录下的 .json 文件（小牛马原生格式）
+          if (entry.isFile() && entry.name.endsWith('.json')) {
+            const raw = fs.readFileSync(path.join(dir, entry.name), 'utf-8')
+            const skill = JSON.parse(raw) as AgentSkill
+            if (validateSkill(skill)) {
+              skill.scope = 'user'
+              result.push(skill)
+            } else {
+              log.warn(`[Skill] 跳过无效全局 skill 文件: ${entry.name}`)
+            }
+            continue
+          }
+
+          // 格式2: 子目录形式，尝试读取 <dir>/SKILL.md（通用 skill 标准）
+          if (entry.isDirectory()) {
+            const skillMdPath = path.join(dir, entry.name, 'SKILL.md')
+            if (!fs.existsSync(skillMdPath)) {
+              continue
+            }
+
+            const content = fs.readFileSync(skillMdPath, 'utf-8')
+            const skill = parseSkillFromMarkdown(content, entry.name, path.join(dir, entry.name))
+            if (skill) {
+              result.push(skill)
+              log.info(`[Skill] 从 SKILL.md 加载全局 skill: ${skill.name} (id=${skill.id})`)
+            }
+          }
+        } catch (e) {
+          log.warn(`[Skill] 解析全局 skill 失败 ${entry.name}:`, e)
+        }
+      }
+    } catch (e) {
+      log.warn(`[Skill] 读取全局 skill 目录失败 ${dir}:`, e)
+    }
+  }
+  if (result.length > 0) {
+    log.info(`[Skill] 已加载 ${result.length} 个全局 skill 从 ${GLOBAL_SKILLS_DIRS.join(', ')}`)
+  }
+  return result
+}
+
 /** 校验一个 skill 是否字段合法 */
 export function validateSkill(s: unknown): s is AgentSkill {
   if (!s || typeof s !== 'object') return false
@@ -109,7 +245,7 @@ export function validateSkill(s: unknown): s is AgentSkill {
 
 // ── 查询 ───────────────────────────────────────
 
-/** 获取全部可用 skill（内置 + 用户），附带安装/启用状态 */
+/** 获取全部可用 skill（内置 + 全局 + 用户），附带安装/启用状态 */
 export function getAllSkills(): SkillWithState[] {
   const records = getInstallRecords()
   const recordMap = new Map(records.map(r => [r.skillId, r]))
@@ -123,11 +259,13 @@ export function getAllSkills(): SkillWithState[] {
   })
 
   const builtins = BUILT_IN_SKILLS.map(s => toState(s, true))
+  const globalSkills = loadGlobalSkills().map(s => toState(s, true))
   const userSkills = loadUserSkills().map(s => toState(s, true))
 
-  // 用户 skill 若与内置同 id，则用户覆盖内置
+  // 优先级：用户 > 全局 > 内置（同 id 则后者覆盖前者）
   const merged = new Map<string, SkillWithState>()
   for (const s of builtins) merged.set(s.id, s)
+  for (const s of globalSkills) merged.set(s.id, s)
   for (const s of userSkills) merged.set(s.id, s)
   return [...merged.values()]
 }

@@ -318,6 +318,87 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     },
   },
 
+  // ── 技能管理 ─────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'skill_list',
+      description: '列出所有已安装的技能，返回技能列表（含 id、名称、描述、启用状态等）。',
+      parameters: { type: 'object', properties: {} },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'skill_get',
+      description: '获取指定技能的详细信息（完整 JSON 定义）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '技能 id' },
+        },
+        required: ['id'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'skill_install',
+      description: '安装一个新技能。传入完整的技能 JSON 对象（包含 id、name、description、triggers、systemPromptAddition 等字段）。技能将保存到用户目录并立即启用。',
+      parameters: {
+        type: 'object',
+        properties: {
+          skill_json: { type: 'string', description: '技能的完整 JSON 字符串，必须符合 AgentSkill 格式' },
+        },
+        required: ['skill_json'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'skill_update',
+      description: '更新已存在的用户技能。传入完整的更新后技能 JSON 对象。只能更新用户安装的技能，不能修改内置技能。',
+      parameters: {
+        type: 'object',
+        properties: {
+          skill_json: { type: 'string', description: '更新后的技能完整 JSON 字符串' },
+        },
+        required: ['skill_json'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'skill_toggle',
+      description: '启用或禁用指定技能。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '技能 id' },
+          enabled: { type: 'boolean', description: 'true=启用, false=禁用' },
+        },
+        required: ['id', 'enabled'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'skill_delete',
+      description: '删除用户安装的技能。内置技能无法删除，只能禁用。删除前请与用户确认。',
+      parameters: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: '技能 id' },
+        },
+        required: ['id'],
+      },
+    },
+  },
+
   // ── 系统操作 ─────────────────────────────────
   {
     type: 'function',
@@ -370,7 +451,7 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
  * 工具分组：仅用于 UI 渲染开关，不影响 LLM 调用协议
  * 给设置页一个清晰的"按类别批量启停"视图，比一字排开 N 个 checkbox 友好
  */
-export type ToolGroupId = 'file' | 'command' | 'data' | 'scheduler' | 'system' | 'control'
+export type ToolGroupId = 'file' | 'command' | 'data' | 'scheduler' | 'skill' | 'system' | 'control'
 
 export interface ToolGroupMeta {
   id: ToolGroupId
@@ -414,6 +495,19 @@ export const AGENT_TOOL_GROUPS: ToolGroupMeta[] = [
       'scheduler_update_task',
       'scheduler_delete_task',
       'scheduler_toggle_task',
+    ],
+  },
+  {
+    id: 'skill',
+    label: '技能管理',
+    description: '查看/安装/更新/删除/启停 Agent 技能（关闭后 Agent 不能管理技能）',
+    toolNames: [
+      'skill_list',
+      'skill_get',
+      'skill_install',
+      'skill_update',
+      'skill_toggle',
+      'skill_delete',
     ],
   },
   {

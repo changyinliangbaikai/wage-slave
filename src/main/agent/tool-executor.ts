@@ -38,6 +38,15 @@ import {
 import { assertSafePath, expandHome, checkCommand, confirmCommandWithUser } from './security'
 import { isToolEnabled } from './tool-registry'
 import { recordAgentAudit } from './audit-log'
+import {
+  getAllSkills,
+  getSkillById,
+  saveUserSkill,
+  toggleSkill,
+  deleteUserSkill,
+  validateSkill,
+} from './skills/store'
+import type { AgentSkill } from '@shared/types'
 
 /** 工具最大输出字符数（防止把整个仓库灌给 LLM） */
 const MAX_TOOL_OUTPUT = 16_000
@@ -84,6 +93,13 @@ export async function executeTool(call: AgentToolCall): Promise<AgentToolResult>
       case 'scheduler_update_task': raw = await toolSchedulerUpdateTask(call.arguments); break
       case 'scheduler_delete_task': raw = await toolSchedulerDeleteTask(call.arguments); break
       case 'scheduler_toggle_task': raw = await toolSchedulerToggleTask(call.arguments); break
+      // 技能管理
+      case 'skill_list':   raw = await toolSkillList(); break
+      case 'skill_get':    raw = await toolSkillGet(call.arguments as { id: string }); break
+      case 'skill_install': raw = await toolSkillInstall(call.arguments as { skill_json: string }); break
+      case 'skill_update': raw = await toolSkillUpdate(call.arguments as { skill_json: string }); break
+      case 'skill_toggle': raw = await toolSkillToggle(call.arguments as { id: string; enabled: boolean }); break
+      case 'skill_delete': raw = await toolSkillDelete(call.arguments as { id: string }); break
       // 系统操作
       case 'open_file':         raw = await toolOpenFile(call.arguments); break
       case 'show_notification': raw = await toolShowNotification(call.arguments); break
@@ -911,6 +927,98 @@ function formatTodo(t: TodoItem): string {
   const status = t.status === 'done' ? '✓' : ' '
   const est = t.estimated_min ? ` ⏱${t.estimated_min}m` : ''
   return `  [${status}] ${t.title} (id=${t.id}, priority=${t.priority}${est})`
+}
+
+// ── 技能管理工具 ──────────────────────────────
+
+async function toolSkillList(): Promise<string> {
+  const skills = getAllSkills()
+  const lines = skills.map(s => {
+    const status = s.enabled ? '✓' : '✗'
+    const scope = s.scope === 'builtin' ? '内置' : s.scope === 'user' ? '用户' : '远程'
+    return `[${status}] ${s.name} (id=${s.id}, ${scope}, ${s.category})`
+  })
+  return `共 ${skills.length} 个技能:\n${lines.join('\n')}`
+}
+
+async function toolSkillGet(args: { id: string }): Promise<string> {
+  const skill = getSkillById(args.id)
+  if (!skill) {
+    throw new Error(`技能不存在: ${args.id}`)
+  }
+  return JSON.stringify(skill, null, 2)
+}
+
+async function toolSkillInstall(args: { skill_json: string }): Promise<string> {
+  let skill: AgentSkill
+  try {
+    skill = JSON.parse(args.skill_json) as AgentSkill
+  } catch {
+    throw new Error('技能 JSON 解析失败')
+  }
+
+  if (!validateSkill(skill)) {
+    throw new Error('技能格式非法：缺少 id/name/description/systemPromptAddition/triggers 等必要字段')
+  }
+
+  // 确保 scope 是 user
+  skill.scope = 'user'
+
+  const result = saveUserSkill(skill, 'user')
+  return `技能 "${result.name}" (id=${result.id}) 安装成功，已启用`
+}
+
+async function toolSkillUpdate(args: { skill_json: string }): Promise<string> {
+  let skill: AgentSkill
+  try {
+    skill = JSON.parse(args.skill_json) as AgentSkill
+  } catch {
+    throw new Error('技能 JSON 解析失败')
+  }
+
+  if (!skill.id) {
+    throw new Error('技能 JSON 缺少 id 字段')
+  }
+
+  // 检查技能是否存在且不是内置技能
+  const existing = getSkillById(skill.id)
+  if (!existing) {
+    throw new Error(`技能不存在: ${skill.id}，请使用 skill_install 安装新技能`)
+  }
+  if (existing.scope === 'builtin') {
+    throw new Error(`内置技能 "${skill.id}" 无法修改，只能禁用/启用`)
+  }
+
+  // 合并现有技能的状态
+  skill.scope = existing.scope
+
+  // 保存更新后的技能（saveUserSkill 会覆盖同 id 的技能）
+  const result = saveUserSkill(skill, existing.scope)
+  return `技能 "${result.name}" (id=${result.id}) 更新成功`
+}
+
+async function toolSkillToggle(args: { id: string; enabled: boolean }): Promise<string> {
+  const result = toggleSkill(args.id, args.enabled)
+  if (!result) {
+    throw new Error(`技能不存在: ${args.id}`)
+  }
+  return `技能 "${result.name}" 已${result.enabled ? '启用' : '禁用'}`
+}
+
+async function toolSkillDelete(args: { id: string }): Promise<string> {
+  const skill = getSkillById(args.id)
+  if (!skill) {
+    throw new Error(`技能不存在: ${args.id}`)
+  }
+  if (skill.scope === 'builtin') {
+    throw new Error(`内置技能 "${args.id}" 无法删除，只能禁用`)
+  }
+
+  const success = deleteUserSkill(args.id)
+  if (!success) {
+    throw new Error(`删除技能 "${args.id}" 失败`)
+  }
+  return `技能 "${skill.name}" (id=${args.id}) 已删除`
 }
 
 function diffSummary(before: TodoItem, after: TodoItem): string {

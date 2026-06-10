@@ -215,4 +215,81 @@ export const BUILT_IN_SKILLS: AgentSkill[] = [
     scope: 'builtin',
     meta: { tags: ['写作', '润色', '翻译'], createdAt: BUILT_IN_SKILL_DATE, updatedAt: BUILT_IN_SKILL_DATE },
   },
+
+  // ── 9. 技能创建者 ───────────────────────────
+  {
+    id: 'skill-creator',
+    name: '技能创建者',
+    description: '创建新技能、修改和优化现有技能。用于将工作流固化成可复用的 Agent Skill，实现技能的持续进化',
+    category: 'automation',
+    icon: '🛠️',
+    author: '小小牛马',
+    version: '1.0.0',
+    triggers: [
+      '创建技能',
+      '新建技能',
+      '做个技能',
+      '修改技能',
+      '优化技能',
+      '更新技能',
+      'skill creator',
+      'make a skill',
+      'edit skill',
+      'update skill',
+    ],
+    systemPromptAddition: `## 当前技能：技能创建者
+
+你是技能创建专家，帮助用户将工作流固化为可复用的 Agent Skill。
+
+### 技能结构
+小牛马的技能是 JSON 格式，包含以下字段：
+- id: 唯一标识（kebab-case，如 my-skill）
+- name: 显示名称
+- description: 一句话描述（用于触发判断）
+- category: 分类（productivity/file/code/writing/automation/custom）
+- icon: emoji 图标
+- author: 作者名
+- version: 版本号（如 1.0.0）
+- triggers: 触发关键词数组
+- systemPromptAddition: 激活后注入 System Prompt 的指令
+- recommendedTools: 推荐工具列表（可选）
+
+### 创建新技能流程
+1. 用 skill_list 查看现有技能，避免 id 冲突
+2. 与用户讨论：技能目标、触发场景、执行步骤、推荐工具
+3. 编写 skill JSON，用 skill_install 安装
+4. 测试：用 skill_get 确认安装成功
+
+### 修改现有技能流程
+1. 用 skill_get 获取现有技能 JSON
+2. 与用户讨论修改点
+3. 修改 JSON 后，用 skill_update 更新
+4. 注意：内置技能（scope=builtin）无法修改，只能禁用
+
+### 技能持续进化
+- 观察技能使用效果
+- 收集用户反馈
+- 定期用 skill_update 迭代优化
+- 用 skill_toggle 控制技能启用/禁用
+
+### 最佳实践
+- systemPromptAddition 要写清楚执行步骤
+- triggers 要覆盖多种用户表达方式
+- 推荐工具要实际存在且相关
+- 描述要具体，说明"什么时候用这个技能"`,
+    recommendedTools: [
+      'skill_list',
+      'skill_get',
+      'skill_install',
+      'skill_update',
+      'skill_toggle',
+      'skill_delete',
+    ],
+    scope: 'builtin',
+    meta: {
+      tags: ['技能', '创建', '自动化', '进化'],
+      createdAt: BUILT_IN_SKILL_DATE,
+      updatedAt: BUILT_IN_SKILL_DATE,
+    },
+  },
 ]
