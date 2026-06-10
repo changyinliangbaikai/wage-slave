@@ -219,7 +219,8 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
 
         // 3) tool_calls（按 index 增量累积）
         if (Array.isArray(delta.tool_calls)) {
-          log.info(`[AgentLLM] 收到 tool_calls chunk: ${delta.tool_calls.length} 个`)
+          // 只在累积新的 tool_calls 时记录 debug 日志（避免刷屏）
+          const beforeCount = toolBuffer.size
           for (const tc of delta.tool_calls) {
             const idx = tc.index ?? 0
             const buf = toolBuffer.get(idx) ?? { id: '', name: '', arguments: '' }
@@ -227,6 +228,10 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
             if (tc.function?.name) buf.name = tc.function.name
             if (tc.function?.arguments) buf.arguments += tc.function.arguments
             toolBuffer.set(idx, buf)
+          }
+          const afterCount = toolBuffer.size
+          if (afterCount > beforeCount) {
+            log.debug(`[AgentLLM] 新增 tool_calls: ${afterCount - beforeCount} 个 (总计 ${afterCount})`)
           }
         }
 

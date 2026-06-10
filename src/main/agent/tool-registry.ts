@@ -222,8 +222,9 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     function: {
       name: 'scheduler_create_task',
       description:
-        '在小牛马应用内创建一条定时任务。这是处理"设置定时""每天X点提醒我""每周X""每隔N分钟"等需求的【唯一】正确方式——严禁使用 run_command 操作系统 crontab / launchctl / launchd / schtasks。' +
-        ' 默认建议 kind=agent，触发时直接让小牛马 Agent 执行 user_input 中的指令；只有用户明确要求执行 shell 命令时才用 kind=shell。',
+        '在小牛马应用内创建一条定时任务。这是处理"设置定时""每天X点提醒我""每周X""每隔N分钟""X分钟后提醒我""指定日期执行"等需求的【唯一】正确方式——严禁使用 run_command 操作系统 crontab / launchctl / launchd / schtasks，也严禁使用 wait 工具来延迟提醒。' +
+        ' 默认建议 kind=agent，触发时直接让小牛马 Agent 执行 user_input 中的指令；只有用户明确要求执行 shell 命令时才用 kind=shell。' +
+        ' 特别注意：即使是"10秒后提醒我"这种短时间的延迟提醒，也必须使用 schedule_type=delay 创建定时任务，而不是用 wait 工具阻塞等待。定时任务可以在应用重启后继续执行，而 wait 工具会阻塞会话且无法持久化。',
       parameters: {
         type: 'object',
         properties: {
@@ -241,8 +242,8 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
           work_dir: { type: 'string', description: '【kind=shell 可选】工作目录' },
           schedule_type: {
             type: 'string',
-            enum: ['interval', 'daily', 'weekly'],
-            description: 'interval=每隔 N 分钟；daily=每天 HH:mm；weekly=每周指定一天 HH:mm',
+            enum: ['interval', 'daily', 'weekly', 'once', 'delay'],
+            description: 'interval=每隔 N 分钟；daily=每天 HH:mm；weekly=每周指定一天 HH:mm；once=指定日期时间只执行一次；delay=延迟 N 分钟后执行一次',
           },
           interval_minutes: {
             type: 'integer',
@@ -259,6 +260,15 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
             description: '【schedule_type=weekly 必填】星期几：0=周日 1=周一 ... 6=周六',
             minimum: 0,
             maximum: 6,
+          },
+          execute_at: {
+            type: 'string',
+            description: '【schedule_type=once 必填】ISO8601 格式的日期时间，如 2026-06-15T14:30:00',
+          },
+          delay_seconds: {
+            type: 'integer',
+            description: '【schedule_type=delay 必填】延迟执行的秒数 (>=1)。支持精确到秒，如 10 秒后提醒。超过 60 秒会显示为"X分Y秒"，超过 3600 秒显示为"X时Y分Z秒"。',
+            minimum: 1,
           },
           enabled: { type: 'boolean', description: '创建后是否立即启用，默认 true' },
         },
@@ -279,10 +289,12 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
           user_input: { type: 'string', description: '仅 agent 任务有效' },
           command: { type: 'string', description: '仅 shell 任务有效' },
           work_dir: { type: 'string' },
-          schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly'] },
+          schedule_type: { type: 'string', enum: ['interval', 'daily', 'weekly', 'once', 'delay'] },
           interval_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
           time: { type: 'string' },
           week_day: { type: 'integer', minimum: 0, maximum: 6 },
+          execute_at: { type: 'string', description: 'ISO8601 格式的日期时间，如 2026-06-15T14:30:00' },
+          delay_seconds: { type: 'integer', minimum: 1, description: '延迟执行的秒数' },
           enabled: { type: 'boolean' },
         },
         required: ['id'],
@@ -435,7 +447,7 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'wait',
-      description: '暂停指定毫秒数（最大 60000）。仅在确实需要等待外部事件时使用，避免浪费用户时间。',
+      description: '暂停指定毫秒数（最大 60000）。仅在确实需要等待外部事件时使用，避免浪费用户时间。【严禁】用于"延迟提醒""X分钟后通知我"等定时类需求——这类需求必须使用 scheduler_create_task 工具创建定时任务。wait 工具会阻塞当前会话，且无法持久化（应用重启后丢失），仅适用于如等待文件生成、等待端口就绪等技术场景。',
       parameters: {
         type: 'object',
         properties: {

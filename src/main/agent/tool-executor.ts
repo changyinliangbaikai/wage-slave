@@ -543,6 +543,24 @@ async function loadScheduler(): Promise<typeof import('../tools/task-scheduler')
   return await import('../tools/task-scheduler')
 }
 
+/** 格式化秒数为易读的时分秒格式 */
+function formatDelaySeconds(seconds: number): string {
+  if (seconds < 60) {
+    return `${seconds}秒后执行一次`
+  }
+  if (seconds < 3600) {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return secs === 0 ? `${mins}分钟后执行一次` : `${mins}分${secs}秒后执行一次`
+  }
+  const hrs = Math.floor(seconds / 3600)
+  const mins = Math.floor((seconds % 3600) / 60)
+  const secs = seconds % 60
+  if (mins === 0 && secs === 0) return `${hrs}小时后执行一次`
+  if (secs === 0) return `${hrs}时${mins}分后执行一次`
+  return `${hrs}时${mins}分${secs}秒后执行一次`
+}
+
 /** 把 TaskSchedule 渲染成人话给 LLM 看 */
 function formatScheduleStr(s: TaskSchedule): string {
   if (s.type === 'interval') return `每 ${s.intervalMinutes ?? 60} 分钟`
@@ -550,6 +568,15 @@ function formatScheduleStr(s: TaskSchedule): string {
   if (s.type === 'weekly') {
     const wd = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
     return `每${wd[s.weekDay ?? 1]} ${s.time ?? '09:00'}`
+  }
+  if (s.type === 'once') {
+    const date = s.executeAt ? new Date(s.executeAt) : null
+    return date && !isNaN(date.getTime())
+      ? `一次性任务 ${date.toLocaleString('zh-CN')}`
+      : `一次性任务 ${s.executeAt ?? '未指定时间'}`
+  }
+  if (s.type === 'delay') {
+    return formatDelaySeconds(s.delaySeconds ?? 0)
   }
   return '未知'
 }
@@ -577,17 +604,25 @@ interface SchedulerCreateArgs {
   user_input?: string
   command?: string
   work_dir?: string
-  schedule_type: 'interval' | 'daily' | 'weekly'
+  schedule_type: 'interval' | 'daily' | 'weekly' | 'once' | 'delay'
   interval_minutes?: number
   time?: string
   week_day?: number
+  execute_at?: string
+  delay_seconds?: number
   enabled?: boolean
 }
 
 /** 校验并构造 TaskSchedule，参数缺失时给 LLM 明确的错误提示 */
 function buildScheduleFromArgs(
-  type: 'interval' | 'daily' | 'weekly',
-  args: { interval_minutes?: number; time?: string; week_day?: number },
+  type: 'interval' | 'daily' | 'weekly' | 'once' | 'delay',
+  args: {
+    interval_minutes?: number
+    time?: string
+    week_day?: number
+    execute_at?: string
+    delay_seconds?: number
+  },
 ): TaskSchedule {
   if (type === 'interval') {
     const mins = args.interval_minutes
@@ -596,6 +631,29 @@ function buildScheduleFromArgs(
     }
     return { type: 'interval', intervalMinutes: Math.floor(mins) }
   }
+
+  if (type === 'once') {
+    const executeAt = (args.execute_at ?? '').trim()
+    if (!executeAt) {
+      throw new Error('schedule_type=once 时必须提供 execute_at（ISO8601 格式日期时间，如 2026-06-15T14:30:00）')
+    }
+    const date = new Date(executeAt)
+    if (isNaN(date.getTime())) {
+      throw new Error(`execute_at 格式不正确：${executeAt}，请使用 ISO8601 格式，如 2026-06-15T14:30:00`)
+    }
+    return { type: 'once', executeAt }
+  }
+
+  if (type === 'delay') {
+    const secs = args.delay_seconds
+    if (typeof secs !== 'number' || secs < 1) {
+      throw new Error('schedule_type=delay 时必须提供 delay_seconds（>=1 的秒数）')
+    }
+    // 计算实际执行时间（当前时间 + delay_seconds）
+    const executeAt = new Date(Date.now() + secs * 1000).toISOString()
+    return { type: 'delay', delaySeconds: Math.floor(secs), executeAt }
+  }
+
   // daily / weekly 共享 time 字段
   const t = (args.time ?? '').trim()
   if (!/^\d{1,2}:\d{2}$/.test(t)) {
@@ -664,10 +722,12 @@ interface SchedulerUpdateArgs {
   user_input?: string
   command?: string
   work_dir?: string
-  schedule_type?: 'interval' | 'daily' | 'weekly'
+  schedule_type?: 'interval' | 'daily' | 'weekly' | 'once' | 'delay'
   interval_minutes?: number
   time?: string
   week_day?: number
+  execute_at?: string
+  delay_seconds?: number
   enabled?: boolean
 }
 
@@ -698,6 +758,8 @@ async function toolSchedulerUpdateTask(args: unknown): Promise<string> {
     if (a.interval_minutes !== undefined && s.type === 'interval') s.intervalMinutes = a.interval_minutes
     if (a.time !== undefined && (s.type === 'daily' || s.type === 'weekly')) s.time = a.time
     if (a.week_day !== undefined && s.type === 'weekly') s.weekDay = a.week_day
+    if (a.execute_at !== undefined && s.type === 'once') s.executeAt = a.execute_at
+    // delay 类型不支持局部更新 executeAt（需要重新计算），所以如果要改 delay_seconds，必须同时传 schedule_type
     merged.schedule = s
   }
 

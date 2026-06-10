@@ -31,6 +31,27 @@ function formatSchedule(s: TaskSchedule): string {
   if (s.type === 'interval') return `每 ${s.intervalMinutes ?? 60} 分钟`
   if (s.type === 'daily') return `每天 ${s.time ?? '09:00'}`
   if (s.type === 'weekly') return `每${WEEK_DAYS[s.weekDay ?? 1]} ${s.time ?? '09:00'}`
+  if (s.type === 'once') {
+    const date = s.executeAt ? new Date(s.executeAt) : null
+    return date && !isNaN(date.getTime())
+      ? `一次性 ${date.toLocaleString('zh-CN')}`
+      : `一次性 ${s.executeAt ?? '未指定'}`
+  }
+  if (s.type === 'delay') {
+    const secs = s.delaySeconds ?? 0
+    if (secs < 60) return `${secs}秒后执行`
+    if (secs < 3600) {
+      const mins = Math.floor(secs / 60)
+      const remainingSecs = secs % 60
+      return remainingSecs === 0 ? `${mins}分钟后执行` : `${mins}分${remainingSecs}秒后执行`
+    }
+    const hrs = Math.floor(secs / 3600)
+    const mins = Math.floor((secs % 3600) / 60)
+    const remainingSecs = secs % 60
+    if (mins === 0 && remainingSecs === 0) return `${hrs}小时后执行`
+    if (remainingSecs === 0) return `${hrs}时${mins}分后执行`
+    return `${hrs}时${mins}分${remainingSecs}秒后执行`
+  }
   return '未知'
 }
 
@@ -51,6 +72,11 @@ function statusIcon(status?: string): string {
 }
 
 // ── 默认表单值 ─────────────────────────────────
+const getDefaultExecuteAt = () => {
+  const d = new Date(Date.now() + 3600000)
+  return d.toISOString().slice(0, 16)
+}
+
 const defaultForm = {
   name: '',
   command: '',
@@ -61,6 +87,8 @@ const defaultForm = {
   intervalMinutes: 60,
   time: '09:00',
   weekDay: 1,
+  executeAt: getDefaultExecuteAt(),
+  delaySeconds: 30,
   enabled: true,
 }
 
@@ -134,6 +162,8 @@ export default function SchedulerPanel({ onBack }: Props) {
       intervalMinutes: tpl.schedule.intervalMinutes ?? 60,
       time: tpl.schedule.time ?? '09:00',
       weekDay: tpl.schedule.weekDay ?? 1,
+      executeAt: tpl.schedule.executeAt ?? '',
+      delaySeconds: tpl.schedule.delaySeconds ?? 30,
     })
     setTemplateModalOpen(false)
     setView('form')
@@ -152,6 +182,8 @@ export default function SchedulerPanel({ onBack }: Props) {
       intervalMinutes: task.schedule.intervalMinutes ?? 60,
       time: task.schedule.time ?? '09:00',
       weekDay: task.schedule.weekDay ?? 1,
+      executeAt: task.schedule.executeAt ?? '',
+      delaySeconds: task.schedule.delaySeconds ?? 30,
       enabled: task.enabled,
     })
     setView('form')
@@ -168,8 +200,13 @@ export default function SchedulerPanel({ onBack }: Props) {
     const schedule: TaskSchedule = {
       type: form.scheduleType,
       ...(form.scheduleType === 'interval' && { intervalMinutes: form.intervalMinutes }),
-      ...(form.scheduleType !== 'interval' && { time: form.time }),
+      ...((form.scheduleType === 'daily' || form.scheduleType === 'weekly') && { time: form.time }),
       ...(form.scheduleType === 'weekly' && { weekDay: form.weekDay }),
+      ...(form.scheduleType === 'once' && { executeAt: form.executeAt || new Date(Date.now() + 3600000).toISOString() }),
+      ...(form.scheduleType === 'delay' && {
+        delaySeconds: form.delaySeconds,
+        executeAt: new Date(Date.now() + form.delaySeconds * 1000).toISOString()
+      }),
     }
 
     // 按 kind 装载执行体字段
@@ -401,6 +438,18 @@ export default function SchedulerPanel({ onBack }: Props) {
               >
                 每周执行
               </button>
+              <button
+                className={`schedule-tab ${form.scheduleType === 'once' ? 'active' : ''}`}
+                onClick={() => setForm(f => ({ ...f, scheduleType: 'once' }))}
+              >
+                指定时间
+              </button>
+              <button
+                className={`schedule-tab ${form.scheduleType === 'delay' ? 'active' : ''}`}
+                onClick={() => setForm(f => ({ ...f, scheduleType: 'delay' }))}
+              >
+                延迟执行
+              </button>
             </div>
 
             {/* 间隔分钟 */}
@@ -453,6 +502,38 @@ export default function SchedulerPanel({ onBack }: Props) {
                   className="form-input-small"
                 />
                 <span>执行</span>
+              </div>
+            )}
+
+            {/* 指定日期时间（一次性） */}
+            {form.scheduleType === 'once' && (
+              <div className="schedule-detail">
+                <span>执行时间</span>
+                <input
+                  type="datetime-local"
+                  value={form.executeAt.slice(0, 16)}
+                  onChange={e => setForm(f => ({ ...f, executeAt: e.target.value }))}
+                  className="form-input-small"
+                  style={{ width: 200 }}
+                />
+                <span className="form-hint" style={{ fontSize: 12, color: '#8b7a5d', marginLeft: 8 }}>
+                  任务执行后将自动禁用
+                </span>
+              </div>
+            )}
+
+            {/* 延迟执行 */}
+            {form.scheduleType === 'delay' && (
+              <div className="schedule-detail">
+                <span>延迟</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={form.delaySeconds}
+                  onChange={e => setForm(f => ({ ...f, delaySeconds: Number(e.target.value) || 30 }))}
+                  className="form-input-small"
+                />
+                <span>秒后执行（任务执行后将自动禁用）。支持精确到秒，超过60秒会显示为时分秒格式。</span>
               </div>
             )}
           </div>

@@ -1,7 +1,7 @@
 /**
  * 定时任务调度器
- * - 任务 CRUD（持久化到 JSON 文件）
- * - 基于 setInterval 的调度引擎（每 30 秒检查一次）
+ * - 任务 CRUD（持久化到 JSON 文件，内存缓存避免频繁磁盘 I/O）
+ * - 基于 setInterval 的调度引擎（每秒检查一次，支持秒级精度）
  * - 通过 child_process.spawn 执行用户自定义命令
  * - 执行日志存储与管理
  */
@@ -57,8 +57,13 @@ const WEEK_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', 
 // 记录调度引擎启动时间，用于跳过启动前已错过的任务
 let schedulerStartTime: Date | null = null
 let powerResumeRegistered = false
-// 启动期内"已错过并打印过跳过日志"的任务 ID，避免每 30s 重复刷屏
+// 启动期内"已错过并打印过跳过日志"的任务 ID，避免每 5s 重复刷屏
 const loggedSkippedTaskIds = new Set<string>()
+
+// ── 任务列表缓存 ─────────────────────────────
+// 避免每秒都从磁盘读取 tasks.json，缓存到内存并在修改时同步
+let cachedTasks: ScheduledTask[] | null = null
+let isCacheDirty = false // 标记缓存是否需要从磁盘刷新
 
 // ── 广播任务列表变化 ──────────────────────────
 /**
@@ -96,9 +101,23 @@ function broadcastAgentCronResult(taskName: string, status: 'success' | 'failed'
 
 // ── 任务 CRUD ────────────────────────────────
 
-/** 获取所有任务 */
+/** 获取所有任务（使用内存缓存，避免频繁磁盘 I/O） */
 export function listTasks(): ScheduledTask[] {
-  return readJSON<ScheduledTask[]>(TASKS_FILE, [])
+  if (cachedTasks && !isCacheDirty) {
+    // 返回浅拷贝数组，防止外部修改影响缓存（防御性编程）
+    return [...cachedTasks]
+  }
+
+  const tasks = readJSON<ScheduledTask[]>(TASKS_FILE, [])
+  cachedTasks = tasks
+  isCacheDirty = false
+  return [...tasks]
+}
+
+/** 强制刷新任务缓存（当外部修改了 tasks.json 时调用） */
+export function refreshTaskCache(): void {
+  isCacheDirty = true
+  cachedTasks = null
 }
 
 /**
@@ -109,7 +128,7 @@ export function listTasks(): ScheduledTask[] {
  *  签名上将 command 放宽为可选；具体校验由调用方负责
  */
 export function saveTask(task: Partial<ScheduledTask> & { name: string }): ScheduledTask {
-  const tasks = listTasks()
+  const tasks = listTasks() // 返回缓存引用
   const now = new Date().toISOString()
 
   if (task.id) {
@@ -118,6 +137,7 @@ export function saveTask(task: Partial<ScheduledTask> & { name: string }): Sched
     if (idx >= 0) {
       const updated: ScheduledTask = { ...tasks[idx], ...task, updatedAt: now }
       tasks[idx] = updated
+      cachedTasks = tasks // 同步更新缓存
       atomicWrite(TASKS_FILE, tasks)
       console.log(`[TaskScheduler] 更新任务: ${updated.name} (${updated.id}, kind=${updated.kind ?? 'shell'})`)
       broadcastTasksChanged('update', updated.id)
@@ -141,6 +161,7 @@ export function saveTask(task: Partial<ScheduledTask> & { name: string }): Sched
   }
 
   tasks.push(newTask)
+  cachedTasks = tasks // 同步更新缓存
   atomicWrite(TASKS_FILE, tasks)
   console.log(`[TaskScheduler] 新建任务: ${newTask.name} (${newTask.id}, kind=${newTask.kind ?? 'shell'})`)
   broadcastTasksChanged('create', newTask.id)
@@ -149,10 +170,11 @@ export function saveTask(task: Partial<ScheduledTask> & { name: string }): Sched
 
 /** 删除任务 */
 export function deleteTask(taskId: string): boolean {
-  const tasks = listTasks()
+  const tasks = listTasks() // 返回缓存引用
   const filtered = tasks.filter(t => t.id !== taskId)
   if (filtered.length === tasks.length) return false
 
+  cachedTasks = filtered // 同步更新缓存
   atomicWrite(TASKS_FILE, filtered)
 
   // 同时清理该任务的日志文件
@@ -166,12 +188,13 @@ export function deleteTask(taskId: string): boolean {
 
 /** 切换任务启用状态 */
 export function toggleTask(taskId: string): ScheduledTask | null {
-  const tasks = listTasks()
+  const tasks = listTasks() // 返回缓存引用
   const task = tasks.find(t => t.id === taskId)
   if (!task) return null
 
   task.enabled = !task.enabled
   task.updatedAt = new Date().toISOString()
+  cachedTasks = tasks // 同步更新缓存（虽然直接修改了对象，但显式同步更清晰）
   atomicWrite(TASKS_FILE, tasks)
   console.log(`[TaskScheduler] 任务 ${task.name} ${task.enabled ? '启用' : '禁用'}`)
   broadcastTasksChanged('toggle', task.id)
@@ -715,6 +738,33 @@ function checkTasks(): void {
         console.log(`[TaskScheduler] 每周调度触发: ${task.name} (计划 ${WEEK_NAMES[schedule.weekDay ?? 1]} ${schedule.time})`)
         runTask(task.id)
       }
+    } else if (schedule.type === 'once' || schedule.type === 'delay') {
+      // 一次性任务：到达指定时间执行，执行后自动禁用
+      if (!schedule.executeAt) continue
+
+      const executeAt = new Date(schedule.executeAt)
+      if (isNaN(executeAt.getTime())) {
+        console.warn(`[TaskScheduler] 任务时间格式错误: ${task.name}, executeAt=${schedule.executeAt}`)
+        continue
+      }
+
+      // 检查是否已执行过
+      if (task.lastRunAt) {
+        const lastRun = new Date(task.lastRunAt)
+        // 如果已在此时间后执行过，禁用任务
+        if (lastRun >= executeAt) {
+          console.log(`[TaskScheduler] 一次性任务已执行过，自动禁用: ${task.name}`)
+          toggleTask(task.id)
+          continue
+        }
+      }
+
+      // 检查是否到达执行时间
+      if (now.getTime() >= executeAt.getTime()) {
+        console.log(`[TaskScheduler] 一次性任务触发: ${task.name} (计划 ${executeAt.toLocaleString('zh-CN')})`)
+        runTask(task.id)
+        // 执行后任务会在下次检查时被禁用（通过上面的 lastRunAt 判断）
+      }
     }
   }
 }
@@ -730,8 +780,8 @@ export function startTaskScheduler(): void {
   // 清空上次启动期的"已跳过"标记，本次重新判断
   loggedSkippedTaskIds.clear()
   console.log(`[TaskScheduler] 调度引擎已启动，启动时间: ${schedulerStartTime.toLocaleTimeString()}`)
-  // 每 30 秒检查一次
-  schedulerInterval = setInterval(checkTasks, 30 * 1000)
+  // 每秒检查一次（支持秒级精度的定时任务）
+  schedulerInterval = setInterval(checkTasks, 1000)
   if (!powerResumeRegistered) {
     powerMonitor.on('resume', handlePowerResume)
     powerResumeRegistered = true

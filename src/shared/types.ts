@@ -384,7 +384,7 @@ export interface FileReadResult {
 // ─────────────────────────────────────────────
 
 /** 定时任务调度类型 */
-export type ScheduleType = 'interval' | 'daily' | 'weekly'
+export type ScheduleType = 'interval' | 'daily' | 'weekly' | 'once' | 'delay'
 
 /** 定时任务调度配置 */
 export interface TaskSchedule {
@@ -395,6 +395,10 @@ export interface TaskSchedule {
   time?: string
   /** 星期几 0=周日 1=周一 ... 6=周六（type=weekly 时使用） */
   weekDay?: number
+  /** 指定日期时间 ISO8601（type=once 时使用） */
+  executeAt?: string
+  /** 延迟秒数（type=delay 时使用） */
+  delaySeconds?: number
 }
 
 /** 任务执行体类型（Phase 3：扩展为 shell 或 agent） */

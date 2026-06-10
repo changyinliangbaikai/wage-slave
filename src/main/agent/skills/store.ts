@@ -33,6 +33,20 @@ const SKILLS_DIR = path.join(app.getPath('userData'), 'skills')
 const INSTALLS_FILE = path.join(SKILLS_DIR, 'installs.json')
 const USER_SKILLS_DIR = path.join(SKILLS_DIR, 'user')
 
+// ── 缓存机制 ─────────────────────────────────
+// 全局技能加载是 I/O 密集型操作，缓存以避免每次调用都重新读取文件系统
+let cachedGlobalSkills: AgentSkill[] | null = null
+let cachedUserSkills: AgentSkill[] | null = null
+let cachedAllSkills: SkillWithState[] | null = null
+
+/** 清除技能缓存（当技能被修改/安装/删除时调用） */
+export function clearSkillCache(): void {
+  cachedGlobalSkills = null
+  cachedUserSkills = null
+  cachedAllSkills = null
+  log.debug('[Skill] 技能缓存已清除')
+}
+
 // 全局 skills 目录（跨项目共享）
 const GLOBAL_SKILLS_DIRS = [
   path.join(os.homedir(), '.devin', 'skills'),
@@ -89,6 +103,11 @@ function isPlainConfig(config: unknown): config is SkillConfig {
 
 /** 加载 user 目录下的全部 skill */
 export function loadUserSkills(): AgentSkill[] {
+  // 返回缓存（如果存在）
+  if (cachedUserSkills) {
+    return cachedUserSkills
+  }
+
   ensureDirs()
   const result: AgentSkill[] = []
   try {
@@ -106,6 +125,8 @@ export function loadUserSkills(): AgentSkill[] {
   } catch (e) {
     log.warn('[Skill] 读取用户 skill 目录失败:', e)
   }
+
+  cachedUserSkills = result
   return result
 }
 
@@ -178,6 +199,11 @@ function parseSkillFromMarkdown(
  * 2. 子目录形式：<skill-dir>/SKILL.md（通用 skill 标准）
  */
 export function loadGlobalSkills(): AgentSkill[] {
+  // 返回缓存（如果存在）
+  if (cachedGlobalSkills) {
+    return cachedGlobalSkills
+  }
+
   const result: AgentSkill[] = []
   for (const dir of GLOBAL_SKILLS_DIRS) {
     try {
@@ -223,6 +249,8 @@ export function loadGlobalSkills(): AgentSkill[] {
       log.warn(`[Skill] 读取全局 skill 目录失败 ${dir}:`, e)
     }
   }
+
+  cachedGlobalSkills = result
   if (result.length > 0) {
     log.info(`[Skill] 已加载 ${result.length} 个全局 skill 从 ${GLOBAL_SKILLS_DIRS.join(', ')}`)
   }
@@ -247,6 +275,11 @@ export function validateSkill(s: unknown): s is AgentSkill {
 
 /** 获取全部可用 skill（内置 + 全局 + 用户），附带安装/启用状态 */
 export function getAllSkills(): SkillWithState[] {
+  // 返回缓存（如果存在）
+  if (cachedAllSkills) {
+    return cachedAllSkills
+  }
+
   const records = getInstallRecords()
   const recordMap = new Map(records.map(r => [r.skillId, r]))
 
@@ -267,7 +300,9 @@ export function getAllSkills(): SkillWithState[] {
   for (const s of builtins) merged.set(s.id, s)
   for (const s of globalSkills) merged.set(s.id, s)
   for (const s of userSkills) merged.set(s.id, s)
-  return [...merged.values()]
+
+  cachedAllSkills = [...merged.values()]
+  return cachedAllSkills
 }
 
 /** 仅返回"已启用"的 skill（matcher 注入用） */
@@ -316,6 +351,7 @@ export function toggleSkill(id: string, enabled?: boolean): SkillWithState | nul
     config: skill.config ?? {},
   })
   log.info(`[Skill] ${id} 启用状态 → ${next}`)
+  clearSkillCache()
   return { ...skill, enabled: next }
 }
 
@@ -337,6 +373,7 @@ export function updateSkillConfig(id: string, config: SkillConfig): SkillWithSta
     config,
   })
   log.info(`[Skill] 已保存配置: ${id}`)
+  clearSkillCache()
   return { ...skill, config }
 }
 
@@ -360,6 +397,7 @@ export function saveUserSkill(skill: AgentSkill, source: 'user' | 'remote' = 'us
     config: {},
   })
   log.info(`[Skill] 已安装 skill: ${skill.id} (${source})`)
+  clearSkillCache()
   return { ...normalized, installed: true, enabled: true }
 }
 
@@ -382,5 +420,6 @@ export function deleteUserSkill(id: string): boolean {
   const records = getInstallRecords().filter(r => r.skillId !== id)
   saveInstallRecords(records)
   log.info(`[Skill] 已卸载 skill: ${id}`)
+  clearSkillCache()
   return true
 }
