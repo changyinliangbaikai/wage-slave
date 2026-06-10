@@ -4,7 +4,7 @@
 
 import { Tray, Menu, nativeImage, app } from 'electron'
 import path from 'path'
-import { showMainWindow, openSettingsWindow, openLogWindow, getMainWindow, openAIChatWindow, openAgentChatWindow } from './windows'
+import { showMainWindow, openSettingsWindow, openLogWindow, getMainWindow, openChatWindow } from './windows'
 
 let tray: Tray | null = null
 
@@ -56,12 +56,8 @@ export function createTray(): Tray {
     },
     { type: 'separator' },
     {
-      label: '💬 AI 对话',
-      click: () => openAIChatWindow(),
-    },
-    {
-      label: '🤖 Agent 模式',
-      click: () => openAgentChatWindow(),
+      label: '💬 对话（AI / Agent）',
+      click: () => openChatWindow(),
     },
     {
       label: '📒 查看工作日志',

@@ -40,6 +40,8 @@ export interface AppConfig {
   ai_chat_system_prompt: string // AI 对话的系统提示词（可选，作为「通用」角色的底稿）
   /** AI 对话窗口上次的边界（记忆尺寸/位置） */
   ai_chat_window_bounds?: { x: number; y: number; width: number; height: number }
+  /** 统一对话窗口上次的边界（记忆尺寸/位置） */
+  chat_window_bounds?: { x: number; y: number; width: number; height: number }
   /** 当前激活的桌宠包 id，默认 'default-cat' */
   active_pet_pack: string
   /**

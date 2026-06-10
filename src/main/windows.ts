@@ -34,6 +34,7 @@ let logWindow: BrowserWindow | null = null
 let toolWindow: BrowserWindow | null = null
 let aiChatWindow: BrowserWindow | null = null
 let agentChatWindow: BrowserWindow | null = null
+let chatWindow: BrowserWindow | null = null
 let skillsWindow: BrowserWindow | null = null
 let agentCronWindow: BrowserWindow | null = null
 
@@ -380,6 +381,65 @@ export function openAgentChatWindow(): void {
 
 export function getAgentChatWindow(): BrowserWindow | null {
   return agentChatWindow
+}
+
+// ── 统一对话窗口（AI 对话 + Agent 模式合并） ─────
+/**
+ * 打开（或复用）统一对话窗口，路由 #/chat。
+ * 顶部可在「快速对话 / Agent」两种模式间切换；
+ * 尺寸/位置记忆到 config.chat_window_bounds。
+ */
+export function openChatWindow(): void {
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    if (chatWindow.isMinimized()) chatWindow.restore()
+    chatWindow.show()
+    chatWindow.focus()
+    chatWindow.webContents.send('main:chat-focus-input')
+    return
+  }
+
+  const saved = getConfig().chat_window_bounds
+  const winOpts: Electron.BrowserWindowConstructorOptions = {
+    width: saved?.width ?? 820,
+    height: saved?.height ?? 700,
+    minWidth: 560,
+    minHeight: 500,
+    title: '小小牛马 · 对话',
+    resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  }
+  if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
+    winOpts.x = saved.x
+    winOpts.y = saved.y
+  }
+  chatWindow = new BrowserWindow(winOpts)
+
+  chatWindow.loadURL(getRendererURL('/chat'))
+
+  let saveTimer: NodeJS.Timeout | null = null
+  const saveBounds = () => {
+    if (!chatWindow || chatWindow.isDestroyed()) return
+    const b = chatWindow.getBounds()
+    if (saveTimer) clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      setConfig({ chat_window_bounds: b })
+    }, 300)
+  }
+  chatWindow.on('resize', saveBounds)
+  chatWindow.on('move', saveBounds)
+
+  chatWindow.on('closed', () => {
+    chatWindow = null
+    if (saveTimer) clearTimeout(saveTimer)
+  })
+}
+
+export function getChatWindow(): BrowserWindow | null {
+  return chatWindow
 }
 
 // ── Agent 技能管理窗口 ─────────────────────────

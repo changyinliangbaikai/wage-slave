@@ -174,6 +174,24 @@ export const IPC = {
   // ── Agent 安全策略（D.3） ───────────────────────
   // renderer → main
   AGENT_GET_SECURITY_POLICY: 'renderer:agent-get-security-policy', // 获取安全策略（路径白名单 + 命令黑名单）
+
+  // ── 统一对话系统（AI 对话 + Agent 模式合并） ─────
+  // renderer → main
+  CHAT_START:           'renderer:chat-start',           // 发起对话（chat / agent 模式自动分流）
+  CHAT_STOP:            'renderer:chat-stop',            // 中止当前对话
+  CHAT_OPEN_WINDOW:     'renderer:chat-open-window',     // 打开统一对话窗口
+  CHAT_LIST_SESSIONS:   'renderer:chat-list-sessions',   // 列出全部会话（合并 chat + agent）
+  CHAT_GET_SESSION:     'renderer:chat-get-session',     // 读取一条完整会话
+  CHAT_SAVE_SESSION:    'renderer:chat-save-session',    // 保存/更新一条会话
+  CHAT_DELETE_SESSION:  'renderer:chat-delete-session',  // 删除一条会话
+  CHAT_RENAME_SESSION:  'renderer:chat-rename-session',  // 重命名会话
+  CHAT_SEARCH:          'renderer:chat-search',          // 全文搜索会话
+  // main → renderer（流式推送）
+  CHAT_CHUNK:           'main:chat-chunk',               // 文本/思考增量
+  CHAT_TOOL_EVENT:      'main:chat-tool-event',          // 工具调用状态（Agent 模式）
+  CHAT_DONE:            'main:chat-done',                // 完成（含统计）
+  CHAT_ERROR:           'main:chat-error',               // 出错
+  CHAT_FOCUS_INPUT:     'main:chat-focus-input',         // 窗口被重新唤起时聚焦输入框
 } as const
 
 export type IPCChannel = typeof IPC[keyof typeof IPC]

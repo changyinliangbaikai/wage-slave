@@ -7,6 +7,7 @@ import LogViewer from './pages/LogViewer'
 import ToolsPage from './pages/ToolsPage'
 import AIChat from './pages/AIChat'
 import AgentChat from './pages/AgentChat'
+import Chat from './pages/Chat'
 import SkillsPage from './pages/SkillsPage'
 import AgentCronPage from './pages/agent/AgentCronPage'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -31,6 +32,7 @@ function RootPage() {
   if (hash === '#/settings') return <Settings />
   if (hash === '#/logs') return <LogViewer />
   if (hash === '#/tools') return <ToolsPage />
+  if (hash === '#/chat') return <Chat />
   if (hash === '#/ai-chat') return <AIChat />
   if (hash === '#/agent') return <AgentChat />
   if (hash === '#/skills') return <SkillsPage />

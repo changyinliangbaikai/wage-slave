@@ -20,7 +20,7 @@ process.on('unhandledRejection', reason => {
   const err = reason as { message?: string; stack?: string } | undefined
   log.error('[unhandledRejection]', err?.message ?? String(reason), err?.stack)
 })
-import { createMainWindow, getMainWindow, openAIChatWindow } from './windows'
+import { createMainWindow, getMainWindow, openChatWindow } from './windows'
 import { createTray } from './tray'
 import { startScheduler } from './scheduler'
 import { startActivityMonitor } from './activity-monitor'
@@ -118,8 +118,8 @@ function registerAIChatHotkey(): void {
   if (!ai_chat_hotkey) return
   try {
     const ok = globalShortcut.register(ai_chat_hotkey, () => {
-      console.log('[Main] 全局快捷键触发，唤出 AI 对话窗口')
-      openAIChatWindow()
+      console.log('[Main] 全局快捷键触发，唤出统一对话窗口')
+      openChatWindow()
     })
     if (!ok) {
       console.warn('[Main] 注册 AI 对话快捷键失败:', ai_chat_hotkey)

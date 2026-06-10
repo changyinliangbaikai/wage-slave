@@ -23,8 +23,7 @@ import {
   openSettings,
   openLogs,
   openTools,
-  openAIChat,
-  openAgentChat,
+  openChat,
   notifyBreakDone,
   startWindowDrag,
   moveWindowDrag,
@@ -425,10 +424,10 @@ export default function App() {
     bumpBubble()
   }, [catMood, bumpBubble])
 
-  // 双击小猫 → 打开 AI 对话窗口（双击事件会先触发一次 click，忽略其 idle 回弹即可）
+  // 双击小猫 → 打开统一对话窗口（双击事件会先触发一次 click，忽略其 idle 回弹即可）
   const handleCatDoubleClick = useCallback(() => {
     if (dragRef.current.didMove) return
-    openAIChat()
+    openChat()
   }, [])
 
   // ── 右键菜单手动触发（直接切换，清空排队） ────
@@ -494,8 +493,7 @@ export default function App() {
     { label: '录入工作日志', icon: '📝', onClick: triggerManualLog },
     { label: '生成工作总结', icon: '📊', onClick: triggerSummary },
     { divider: true },
-    { label: 'AI 对话', icon: '💬', onClick: () => openAIChat() },
-    { label: 'Agent 模式', icon: '🤖', onClick: () => openAgentChat() },
+    { label: '对话（AI / Agent）', icon: '💬', onClick: () => openChat() },
     { label: '小工具', icon: '🛠️', onClick: triggerTools },
     { divider: true },
     { label: feedLabel, icon: '🐟', onClick: triggerFeed },

@@ -58,6 +58,7 @@ import {
   searchSessions as searchChatSessions,
 } from './ai-chat-store'
 import { registerAIChatAttachmentHandlers } from './ai-chat-attachments'
+import { registerChatIPC } from './ipc-handlers-chat'
 import { exportSummaryDocx } from './docx-export'
 import { getMainWindow } from './windows'
 import type {
@@ -459,6 +460,9 @@ export function registerIPCHandlers(): void {
 
   // ── Agent 模式（Phase 1） ─────────────────────
   registerAgentIPC()
+
+  // ── 统一对话系统（AI 对话 + Agent 合并） ───────
+  registerChatIPC()
 
   // ── Agent Skill 系统（Phase 2） ───────────────
   registerSkillIPC()
