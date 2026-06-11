@@ -32,7 +32,7 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'read_file',
-      description: '读取本地文件内容。默认最多读取 200 行；可用 offset + max_lines 分块继续读取，避免超大文件撑爆上下文。仅允许在路径白名单内的文件。',
+      description: '读取本地文件内容。支持纯文本文件以及 .docx、.doc、.pdf、.xlsx、.xls 等办公文档（会自动解析提取文本内容）。读取 Word/PDF/Excel 等二进制文档时请直接使用本工具，无需通过 run_command。默认最多读取 200 行；可用 offset + max_lines 分块继续读取，避免超大文件撑爆上下文。仅允许在路径白名单内的文件。',
       parameters: {
         type: 'object',
         properties: {

@@ -1,47 +1,33 @@
-# 小小牛马 🐱
+# 小小牛马 开发与启动指南 🐱
 
-> 一只陪你上班的桌面像素橘猫助手
-
-面向长期在电脑前工作的办公室人员，帮你记录每日工作计划、提醒适时休息、下班复盘任务完成情况，月末/季末一键生成 AI 工作总结。
+> 一只陪你上班的桌面像素橘猫助手。
+> 面向长期在电脑前工作的办公室人员，帮你记录每日工作计划、提醒适时休息、下班复盘任务完成情况，月末/季末一键生成 AI 工作总结，并支持通过 Agent 协助你执行本地操作。
 
 ![像素猫预览](imgs/cat_happy_2.png)
 
 ---
 
-## 功能特性
+## 一、功能特性
 
-- **晨间问候**：到达上班时间自动弹出，用自然语言输入今日计划，AI 自动解析为待办清单
-- **休息提醒**：监测连续使用时长，超过阈值弹出提醒，支持「再等一会儿」
-- **晚间复盘**：下班时弹出，对照待办清单确认完成情况并记录工作日志
-- **周期总结**：月末/季末读取本地日志，调用 AI 一键生成工作总结
-- **像素橘猫**：常驻桌面，可拖动，拖至屏幕边缘自动收起，支持多种动画状态
-- **兼容主流 LLM**：支持所有 OpenAI API 格式的接口（OpenAI、Claude、DeepSeek、本地 Ollama 等）
-
----
-
-## 技术栈
-
-| 层级 | 技术 |
-|------|------|
-| 桌面框架 | Electron 29 |
-| 前端 | React 18 + TypeScript |
-| 构建工具 | electron-vite + Vite 5 |
-| 打包 | electron-builder |
-| 数据存储 | 本地 JSON 文件（`%APPDATA%/xiao-niu-ma/`） |
-| API Key 安全存储 | keytar（系统凭证管理器） |
+- **晨间问候**：到达上班时间自动弹出，用自然语言输入今日计划，AI 自动解析为待办清单。
+- **休息提醒**：监测连续使用时长，超过阈值弹出提醒，支持「再等一会儿」。
+- **晚间复盘**：下班时弹出，对照待办清单确认完成情况并记录工作日志。
+- **周期总结**：月末/季末读取本地日志，调用 AI 一键生成工作总结。
+- **像素橘猫**：常驻桌面，可拖动，拖至屏幕边缘自动收起，支持多种动画状态（空闲、抚摸、庆祝、工作中）。
+- **统一对话与 Agent 助手**：一站式 AI 快速对话与 Agent 模式。Agent 可根据你的指令规划并调用本地工具（如读写文件、运行 Shell 命令、管理待办、定时任务等）来帮你干活。
+- **兼容主流 LLM**：支持所有 OpenAI API 格式的接口（OpenAI、Claude、DeepSeek、本地 Ollama 等）。
 
 ---
 
-## 环境要求
+## 二、开发环境要求
 
 - **Node.js** >= 18
 - **npm** >= 9
-- 开发平台：macOS / Windows 均可
-- 生产运行：Windows 10 / 11
+- **运行平台**：macOS / Windows 10 / Windows 11 （双平台均已完美支持开发、编译与生产运行）。
 
 ---
 
-## 本地开发
+## 三、快速开始与本地开发
 
 ### 1. 克隆项目
 
@@ -56,11 +42,9 @@ cd xiao-niu-ma
 npm install
 ```
 
-> 如果使用了 `iohook`（键鼠全局监听，用于休息提醒），还需要重新编译 native 模块：
-> ```bash
-> npx electron-rebuild -f -w iohook
-> ```
-> 未安装 `iohook` 时，程序会自动降级运行，不影响其他功能。
+> [!NOTE]
+> 休息提醒功能依赖 `uiohook-napi` 进行全局键鼠活跃监测。该依赖在不同平台使用对应的预编译 native 绑定。
+> 如果未安装或加载失败，程序会自动降级运行（始终视为活跃），不会影响其他核心功能的正常使用。
 
 ### 3. 启动开发模式
 
@@ -68,54 +52,54 @@ npm install
 npm run dev
 ```
 
-启动后橘猫会出现在屏幕角落，同时打开 DevTools 方便调试。
+启动后橘猫会出现在屏幕角落，同时会自动打开 DevTools 调试面板。
 
-**Mac 用户可直接使用快速启动脚本：**
-
+**Mac 用户也可使用快速启动脚本：**
 ```bash
 bash dev-mac.sh
 ```
 
 ### 4. 首次配置
 
-启动后在系统托盘右键 → **设置**，填写以下信息：
+橘猫启动后，在系统托盘图标（或 macOS Menu Bar 图标）上**右键 -> 设置**，填写以下必填配置：
 
 | 配置项 | 说明 | 示例 |
 |--------|------|------|
-| LLM API URL | OpenAI 兼容格式的接口地址 | `https://api.openai.com/v1` |
-| API Key | 对应服务的密钥 | `sk-...` |
-| 模型名称 | 要调用的模型 | `gpt-4o` |
-| 上班时间 | 晨间问候触发时间 | `09:00` |
-| 下班时间 | 晚间复盘触发时间 | `18:00` |
+| **LLM API URL** | OpenAI 兼容格式的接口地址 | `https://api.openai.com/v1` |
+| **API Key** | 对应服务的 API Key 密钥 | `sk-...` |
+| **模型名称** | 要调用的模型 | `gpt-4o` 或 `deepseek-chat` |
+| **上班时间** | 晨间问候触发时间 | `09:00` |
+| **下班时间** | 晚间复盘触发时间 | `18:00` |
 
 ---
 
-## 构建与打包
+## 四、构建与打包
 
-### 仅编译（不打包）
+### 1. 仅编译（不打包）
 
 ```bash
 npm run build
 ```
 
 编译产物：
-- `dist/` — Vite 构建的前端资源
-- `dist-electron/` — TypeScript 编译后的主进程代码
+- `dist/` — Vite 构建的前端渲染进程资源
+- `dist-electron/` — TypeScript 编译后的主进程和预加载脚本代码
 
-### 打包为本地安装包
+### 2. 打包为本地安装包
 
 ```bash
 npm run dist
 ```
 
-| 平台 | 产物 | 输出目录 |
+| 运行平台 | 构建产物 | 默认输出目录 |
 |------|------|----------|
-| Windows | `小小牛马-Setup-x.x.x.exe`（NSIS 安装包） | `release/` |
-| macOS | `小小牛马-x.x.x.dmg` | `release/` |
+| **macOS** | `小小牛马-x.x.x.dmg` / `.app` | `release/` |
+| **Windows** | `小小牛马-Setup-x.x.x.exe` (NSIS 安装包) | `release/` |
 
-> **注意**：从 macOS 交叉编译 Windows NSIS 安装包支持不稳定，建议直接在 Windows 机器打包，或使用下方的 GitHub Actions 自动构建。
+> [!TIP]
+> 建议在对应目标平台上进行打包。未签名的安装包在运行时可能会触发系统的安全警告（Windows SmartScreen / macOS 无法验证开发者），手动允许运行即可。
 
-### 类型检查
+### 3. 类型检查
 
 ```bash
 npm run typecheck
@@ -123,155 +107,129 @@ npm run typecheck
 
 ---
 
-## GitHub Actions 自动构建
-
-项目已配置 `.github/workflows/build.yml`，支持两种触发方式：
-
-### 方式一：推送 Tag → 自动发布 Release
-
-打完代码推送一个版本 Tag，Actions 自动在 Windows Runner 上构建并发布到 GitHub Releases：
-
-```bash
-# 确保代码已提交并推送
-git add .
-git commit -m "feat: xxx"
-git push
-
-# 打 Tag（格式必须为 v + 版本号）
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-Actions 完成后，在仓库的 **Releases** 页面即可下载 `.exe` 安装包。
-
-### 方式二：手动触发构建（不发布 Release）
-
-适合在开发阶段测试构建是否正常：
-
-1. 进入 GitHub 仓库页面
-2. 点击顶部 **Actions** 标签
-3. 左侧选择 **Build & Release**
-4. 点击右侧 **Run workflow** 按钮
-5. 构建完成后，在该次 workflow 运行详情页的 **Artifacts** 区域下载安装包（保留 30 天）
-
-### 首次使用前的权限配置
-
-Actions 需要写入权限才能创建 Release，进入仓库设置开启：
-
-```
-仓库 Settings → Actions → General → Workflow permissions
-→ 选择 "Read and write permissions" → Save
-```
-
-`GITHUB_TOKEN` 由 GitHub 自动提供，无需手动配置。
-
-### 代码签名（可选）
-
-未签名的安装包在 Windows 上会触发 SmartScreen 警告（点击「更多信息」→「仍要运行」可绕过）。如需消除警告，购买 EV 代码签名证书后在仓库 Secrets 中配置：
-
-| Secret 名称 | 说明 |
-|-------------|------|
-| `WIN_CSC_LINK` | Base64 编码的 `.p12` 证书文件 |
-| `WIN_CSC_KEY_PASSWORD` | 证书密码 |
-
-然后取消 `build.yml` 中对应行的注释即可生效。
-
----
-
-## 项目结构
+## 五、项目目录结构
 
 ```
 xiao-niu-ma/
 ├── .github/
 │   └── workflows/
-│       └── build.yml          # GitHub Actions 自动构建配置
+│       └── build.yml          # GitHub Actions 自动构建工作流
+├── assets/
+│   ├── icon.icns              # macOS 应用图标
+│   ├── icon.ico               # Windows 应用图标
+│   └── pixel_cat/             # 像素猫 Sprite Sheet 资源
 ├── src/
 │   ├── main/                  # Electron 主进程
-│   │   ├── index.ts           # 入口，初始化所有模块
-│   │   ├── windows.ts         # 窗口管理（透明窗口 + 边缘收起）
-│   │   ├── tray.ts            # 系统托盘
-│   │   ├── scheduler.ts       # 上下班时间定时触发器
-│   │   ├── activity-monitor.ts # 键鼠活跃监测（休息提醒）
-│   │   ├── store.ts           # 本地 JSON 数据读写（原子写入）
-│   │   ├── ipc-handlers.ts    # IPC 事件处理器
-│   │   ├── llm-service.ts     # LLM 服务封装
-│   │   ├── docx-export.ts     # Word 文档导出功能
-│   │   └── tools/             # 工具类
-│   │       ├── index.ts
-│   │       └── spell-check.ts # 拼写检查工具
+│   │   ├── index.ts           # 应用入口，生命周期管理与模块加载
+│   │   ├── windows.ts         # 窗口管理器（透明、鼠标穿透、副窗口工厂化）
+│   │   ├── tray.ts            # 系统托盘与右键菜单
+│   │   ├── scheduler.ts       # 上下班时间定时检测器
+│   │   ├── activity-monitor.ts # 基于 uiohook-napi 的活跃监测
+│   │   ├── store.ts           # 本地数据读写（原子写入保护）
+│   │   ├── api-key.ts         # API Key 安全服务（系统凭证管理）
+│   │   ├── llm-service.ts     # LLM 通用请求封装
+│   │   ├── docx-export.ts     # 工作总结 Word 导出
+│   │   ├── ipc-handlers.ts    # IPC 处理器分发中心
+│   │   ├── ipc-handlers-chat.ts # 统一对话系统 IPC 处理器
+│   │   ├── ipc-handlers-attachment.ts # 对话附件处理 IPC 处理器
+│   │   ├── ipc/               # 拆分后的 IPC 领域业务子模块
+│   │   │   ├── config.ts      # 系统设置 IPC
+│   │   │   ├── data.ts        # 业务数据读写 IPC
+│   │   │   ├── window.ts      # 窗口控制 IPC
+│   │   │   ├── tools.ts       # 小工具挂载 IPC
+│   │   │   ├── scheduler.ts   # Shell 定时任务 IPC
+│   │   │   ├── skills.ts      # Agent 技能系统 IPC
+│   │   │   └── agent-cron.ts  # Agent 定时调度控制面 IPC
+│   │   ├── chat/              # 统一对话业务模块
+│   │   │   ├── dialogue-service.ts # 聊天与 Agent 执行分流服务
+│   │   │   └── chat-store.ts  # 会话数据读写 Facade
+│   │   ├── agent/             # Agent 核心逻辑
+│   │   │   ├── orchestrator.ts  # ReAct 循环、多轮规划与中断机制
+│   │   │   ├── tool-executor.ts # 本地工具执行（支持跨平台命令物理强杀）
+│   │   │   ├── tool-registry.ts # 工具 Schema 与注册表
+│   │   │   ├── security.ts      # 安全护栏（路径白名单与黑名单过滤）
+│   │   │   ├── cron/            # 独立的 Agent 定时任务调度器
+│   │   │   └── skills/          # Agent 扩展技能系统
+│   │   └── tools/             # 小工具业务实现
+│   │       ├── spell-check.ts    # 错别字检查
+│   │       └── task-scheduler.ts # 普通定时任务调度引擎（Shell 运行）
 │   ├── preload/
-│   │   └── index.ts           # 安全桥接主进程与渲染进程
-│   ├── renderer/src/          # React 前端
-│   │   ├── App.tsx            # 根组件（流程调度 + IPC 监听）
-│   │   ├── components/
-│   │   │   ├── PixelCat/      # 像素猫组件 + 动画状态机
-│   │   │   ├── SpeechBubble/  # 像素风说话气泡
-│   │   │   ├── ContextMenu.tsx # 右键菜单组件
-│   │   │   ├── TodoList/      # 待办列表组件
-│   │   │   └── Tools/         # 工具面板组件
-│   │   │       ├── SpellCheck/
-│   │   │       ├── ToolCard.tsx
-│   │   │       ├── ToolsPanel.tsx
-│   │   │       └── index.ts
-│   │   ├── pages/
-│   │   │   ├── MorningFlow.tsx   # 晨间问候流程
-│   │   │   ├── BreakReminder.tsx # 休息提醒流程
+│   │   └── index.ts           # 预加载脚本，桥接 IPC 通道
+│   ├── renderer/src/          # React 渲染进程（前端）
+│   │   ├── main.tsx           # 前端入口与 Hash 路由
+│   │   ├── App.tsx            # 主窗口根组件
+│   │   ├── pages/             # 页面组件
+│   │   │   ├── Chat.tsx       # 统一 AI 对话与 Agent 对话面板
+│   │   │   ├── Settings.tsx   # 设置页
+│   │   │   ├── ToolsPage.tsx  # 工具中心
+│   │   │   ├── SkillsPage.tsx # Agent 技能市场与管理页
+│   │   │   ├── MorningFlow.tsx   # 晨间计划流程
 │   │   │   ├── EveningFlow.tsx   # 晚间复盘流程
-│   │   │   ├── SummaryFlow.tsx   # 周期总结流程
-│   │   │   ├── LogViewer.tsx     # 日志查看器
-│   │   │   └── Settings.tsx      # 设置页面
-│   │   └── hooks/
-│   │       ├── useIPC.ts      # IPC 通信封装
-│   │       └── useLLM.ts      # LLM 调用（计划解析 + 流式总结）
+│   │   │   ├── BreakReminder.tsx # 休息提醒遮罩
+│   │   │   └── LogViewer.tsx     # 历史工作日志查看
+│   │   ├── hooks/             # 自定义 Hooks
+│   │   │   ├── useIPC.ts      # 安全 IPC 通信封装
+│   │   │   ├── useChat.ts     # 统一对话会话状态 Hook
+│   │   │   ├── useFileAttachments.ts # 附件管理 Hook
+│   │   │   └── useCatMood.ts  # 橘猫心情与饥饿度系统
+│   │   └── components/        # 公共组件（PixelCat 宠物引擎等）
 │   └── shared/
-│       ├── types.ts           # 主进程与渲染进程共享类型
-│       └── ipc-channels.ts    # IPC channel 名称常量
-└── assets/
-    ├── icon.icns              # macOS 应用图标
-    ├── icon.ico               # Windows 应用图标
-    ├── tray-icon.png          # 系统托盘图标
-    └── pixel_cat/             # 像素猫 Sprite Sheet 素材
+│       ├── types.ts           # 共享类型定义
+│       ├── types-chat.ts      # 对话系统专用类型
+│       └── ipc-channels.ts    # IPC 通道名称常量
 ```
 
 ---
 
-## 数据存储
+## 六、本地数据存储
 
-所有数据本地存储，不上传任何服务器：
+所有数据均保存在本地，绝不上传第三方服务器：
+
+*   **macOS**：`~/Library/Application Support/xiao-niu-ma/`
+*   **Windows**：`%APPDATA%\xiao-niu-ma\`
+
+### 存储结构：
 
 ```
-%APPDATA%\xiao-niu-ma\          (Windows)
-~/Library/Application Support/xiao-niu-ma/   (macOS 开发时)
-├── config.json                 # 用户配置（不含 API Key）
-├── state.json                  # 每日触发状态
-├── logs\
-│   ├── 2026-04-03.json         # 每日工作日志
+userData/
+├── config.json                 # 用户基础配置（不含 API Key）
+├── state.json                  # 每日触发状态记录
+├── logs/
+│   ├── YYYY-MM-DD.json         # 每日工作日志
 │   └── ...
-└── todos\
-    ├── 2026-04-03.json         # 每日待办清单
-    └── ...
+├── todos/
+│   ├── YYYY-MM-DD.json         # 每日待办清单
+│   └── ...
+├── ai-chats/                   # 统一对话会话数据
+│   ├── sessions.json           # 会话列表索引
+│   └── <session-id>.json       # 单次会话的消息与上下文详情
+├── scheduler/                  # 普通定时任务数据
+│   ├── tasks.json              # 任务配置列表
+│   └── logs/                   # Shell 执行日志输出（最大 5000KB 截断）
+├── agent-cron/                 # 独立的 Agent Cron 任务存储
+└── pets/                       # 用户自主安装的桌宠包
 ```
 
-API Key 单独存储于系统凭证管理器（Windows Credential Manager / macOS Keychain），不写入任何文件。
+> [!IMPORTANT]
+> **API Key 的安全性**：
+> API Key 会被存储到操作系统的安全钥匙串中（Windows 凭据管理器 / macOS Keychain）。
+> 在开发环境下，如果没有相应的系统组件，会自动降级为本地明文存储并弹出警告。API Key 不会包含在任何备份文件中。
 
 ---
 
-## 常见问题
+## 七、常见问题（FAQ）
 
-**Q：休息提醒没有效果？**
-A：休息提醒依赖 `iohook` 全局键鼠监听。如果未安装，可执行 `npm install iohook && npx electron-rebuild -f -w iohook`。若被杀毒软件拦截，请将应用目录加入白名单。
+**Q：休息提醒不生效？**
+*   休息提醒依赖 `uiohook-napi` 对全局键鼠的监听。请确认应用没有被杀毒软件误杀或拦截。在 macOS 上运行，需在「系统设置 -> 隐私与安全性 -> 辅助功能」中授予应用控制权限。
 
-**Q：安装时提示"Windows 已保护你的电脑"？**
-A：点击「更多信息」→「仍要运行」即可。这是因为应用暂未添加代码签名证书，不影响正常使用。
-
-**Q：支持哪些 LLM 服务？**
-A：所有兼容 OpenAI API 格式的服务均可使用，包括 OpenAI、Azure OpenAI、Claude（通过兼容层）、DeepSeek、月之暗面、本地 Ollama 等。
+**Q：如何强杀 Agent 执行时失控的本地命令？**
+*   我们优化了 `run_command` 的消杀机制，在 macOS 上会通过 `-pid` 杀死整个进程组，Windows 则通过 `taskkill` 清理进程树。直接点击对话框中的“停止”按钮，或是直接关闭对话窗口，后台的失控子进程（如 `sleep 60` 等）都会在第一时间被彻底清理，不会滞留后台。
 
 **Q：如何备份工作日志？**
-A：直接复制 `%APPDATA%\xiao-niu-ma\logs\` 目录即可，均为标准 JSON 文件。
+*   直接复制数据目录中的 `logs/` 和 `todos/` 文件夹即可，里面均为标准的 JSON 格式文件。也可使用设置页中的“数据备份与导出”功能，一键打包成 zip 文件。
 
 ---
 
-## License
+## 八、License
 
 MIT

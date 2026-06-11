@@ -32,8 +32,6 @@ let mainWindow: BrowserWindow | null = null
 let settingsWindow: BrowserWindow | null = null
 let logWindow: BrowserWindow | null = null
 let toolWindow: BrowserWindow | null = null
-let aiChatWindow: BrowserWindow | null = null
-let agentChatWindow: BrowserWindow | null = null
 let chatWindow: BrowserWindow | null = null
 let skillsWindow: BrowserWindow | null = null
 let agentCronWindow: BrowserWindow | null = null
@@ -195,18 +193,40 @@ export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }
 
-// ── 设置窗口 ───────────────────────────────────
-export function openSettingsWindow(): void {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.focus()
-    return
+interface SubWindowOptions {
+  hash: string
+  title: string
+  width: number
+  height: number
+  minWidth?: number
+  minHeight?: number
+  resizable?: boolean
+}
+
+/**
+ * 创建或激活子窗口通用工厂函数
+ */
+function createOrFocusSubWindow(
+  options: SubWindowOptions,
+  getWin: () => BrowserWindow | null,
+  setWin: (win: BrowserWindow | null) => void
+): BrowserWindow {
+  let win = getWin()
+
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+    return win
   }
 
-  settingsWindow = new BrowserWindow({
-    width: 520,
-    height: 720,
-    title: '小小牛马 - 设置',
-    resizable: false,
+  win = new BrowserWindow({
+    width: options.width,
+    height: options.height,
+    minWidth: options.minWidth,
+    minHeight: options.minHeight,
+    title: options.title,
+    resizable: options.resizable ?? true,
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -214,173 +234,57 @@ export function openSettingsWindow(): void {
     },
   })
 
-  settingsWindow.loadURL(getRendererURL('/settings'))
+  win.loadURL(getRendererURL(options.hash))
 
-  settingsWindow.on('closed', () => {
-    settingsWindow = null
+  win.on('closed', () => {
+    setWin(null)
   })
+
+  setWin(win)
+  return win
+}
+
+// ── 设置窗口 ───────────────────────────────────
+export function openSettingsWindow(): void {
+  createOrFocusSubWindow(
+    {
+      hash: '/settings',
+      title: '小小牛马 - 设置',
+      width: 520,
+      height: 720,
+      resizable: false,
+    },
+    () => settingsWindow,
+    (win) => { settingsWindow = win }
+  )
 }
 
 // ── 日志查看窗口 ──────────────────────────────────
 export function openLogWindow(): void {
-  if (logWindow && !logWindow.isDestroyed()) {
-    logWindow.focus()
-    return
-  }
-
-  logWindow = new BrowserWindow({
-    width: 560,
-    height: 680,
-    title: '小小牛马 - 工作日志',
-    resizable: true,
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
+  createOrFocusSubWindow(
+    {
+      hash: '/logs',
+      title: '小小牛马 - 工作日志',
+      width: 560,
+      height: 680,
     },
-  })
-
-  logWindow.loadURL(getRendererURL('/logs'))
-
-  logWindow.on('closed', () => {
-    logWindow = null
-  })
+    () => logWindow,
+    (win) => { logWindow = win }
+  )
 }
 
 // ── 小工具窗口 ──────────────────────────────────
 export function openToolWindow(): void {
-  if (toolWindow && !toolWindow.isDestroyed()) {
-    toolWindow.focus()
-    return
-  }
-
-  toolWindow = new BrowserWindow({
-    width: 520,
-    height: 740,
-    title: '小小牛马 - 小工具',
-    resizable: true,
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
+  createOrFocusSubWindow(
+    {
+      hash: '/tools',
+      title: '小小牛马 - 小工具',
+      width: 520,
+      height: 740,
     },
-  })
-
-  toolWindow.loadURL(getRendererURL('/tools'))
-
-  toolWindow.on('closed', () => {
-    toolWindow = null
-  })
-}
-
-// ── AI 快速对话窗口 ────────────────────────────
-/**
- * 打开（或复用）AI 对话窗口。
- * 若窗口已存在则聚焦并通知其聚焦输入框。
- * 尺寸与位置会记忆到 config.ai_chat_window_bounds。
- */
-export function openAIChatWindow(): void {
-  if (aiChatWindow && !aiChatWindow.isDestroyed()) {
-    if (aiChatWindow.isMinimized()) aiChatWindow.restore()
-    aiChatWindow.show()
-    aiChatWindow.focus()
-    aiChatWindow.webContents.send('main:ai-chat-focus-input')
-    return
-  }
-
-  // 读取上次记忆的 bounds（尺寸 + 位置），无记录则用默认值
-  const saved = getConfig().ai_chat_window_bounds
-  const winOpts: Electron.BrowserWindowConstructorOptions = {
-    width: saved?.width ?? 760,
-    height: saved?.height ?? 680,
-    minWidth: 520,
-    minHeight: 480,
-    title: '小小牛马 · AI 对话',
-    resizable: true,
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  }
-  if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
-    winOpts.x = saved.x
-    winOpts.y = saved.y
-  }
-  aiChatWindow = new BrowserWindow(winOpts)
-
-  aiChatWindow.loadURL(getRendererURL('/ai-chat'))
-
-  // 保存尺寸/位置：debounce 处理，避免拖动过程频繁写盘
-  let saveTimer: NodeJS.Timeout | null = null
-  const saveBounds = () => {
-    if (!aiChatWindow || aiChatWindow.isDestroyed()) return
-    const b = aiChatWindow.getBounds()
-    if (saveTimer) clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => {
-      setConfig({ ai_chat_window_bounds: b })
-    }, 300)
-  }
-  aiChatWindow.on('resize', saveBounds)
-  aiChatWindow.on('move', saveBounds)
-
-  aiChatWindow.on('closed', () => {
-    aiChatWindow = null
-    if (saveTimer) clearTimeout(saveTimer)
-  })
-
-  if (isDev) {
-    // 开发期自动打开 devtools 便于调试流式输出
-    // aiChatWindow.webContents.openDevTools({ mode: 'detach' })
-  }
-}
-
-export function getAIChatWindow(): BrowserWindow | null {
-  return aiChatWindow
-}
-
-// ── Agent 对话窗口 ─────────────────────────────
-/**
- * 打开（或复用）Agent 对话窗口。
- * 与 AIChat 窗口共存，独立路由 #/agent；
- * 尺寸/位置目前用默认值，后续可参考 ai_chat_window_bounds 加上记忆能力。
- */
-export function openAgentChatWindow(): void {
-  if (agentChatWindow && !agentChatWindow.isDestroyed()) {
-    if (agentChatWindow.isMinimized()) agentChatWindow.restore()
-    agentChatWindow.show()
-    agentChatWindow.focus()
-    return
-  }
-
-  agentChatWindow = new BrowserWindow({
-    width: 880,
-    height: 720,
-    minWidth: 600,
-    minHeight: 500,
-    title: '小小牛马 · Agent 模式',
-    resizable: true,
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  })
-
-  agentChatWindow.loadURL(getRendererURL('/agent'))
-
-  agentChatWindow.on('closed', () => {
-    agentChatWindow = null
-  })
-
-  if (isDev) {
-    // 开发期方便排查 IPC 流式问题；如不需要可关掉
-    // agentChatWindow.webContents.openDevTools({ mode: 'detach' })
-  }
-}
-
-export function getAgentChatWindow(): BrowserWindow | null {
-  return agentChatWindow
+    () => toolWindow,
+    (win) => { toolWindow = win }
+  )
 }
 
 // ── 统一对话窗口（AI 对话 + Agent 模式合并） ─────
@@ -435,6 +339,16 @@ export function openChatWindow(): void {
   chatWindow.on('closed', () => {
     chatWindow = null
     if (saveTimer) clearTimeout(saveTimer)
+    // 窗口关闭时，强制中断所有活跃的后台对话及 Agent 执行
+    try {
+      import('./ipc-handlers-chat').then(({ abortAllActiveChats }) => {
+        abortAllActiveChats()
+      }).catch(err => {
+        console.warn('[Window] 统一对话窗口关闭时中止后台服务失败:', err)
+      })
+    } catch (err) {
+      console.warn('[Window] 统一对话窗口关闭时同步获取中止函数失败:', err)
+    }
   })
 }
 
@@ -448,32 +362,18 @@ export function getChatWindow(): BrowserWindow | null {
  * 用于浏览/启停/安装内置与市场技能
  */
 export function openSkillsWindow(): void {
-  if (skillsWindow && !skillsWindow.isDestroyed()) {
-    if (skillsWindow.isMinimized()) skillsWindow.restore()
-    skillsWindow.show()
-    skillsWindow.focus()
-    return
-  }
-
-  skillsWindow = new BrowserWindow({
-    width: 820,
-    height: 680,
-    minWidth: 560,
-    minHeight: 480,
-    title: '小小牛马 · 技能中心',
-    resizable: true,
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
+  createOrFocusSubWindow(
+    {
+      hash: '/skills',
+      title: '小小牛马 · 技能中心',
+      width: 820,
+      height: 680,
+      minWidth: 560,
+      minHeight: 480,
     },
-  })
-
-  skillsWindow.loadURL(getRendererURL('/skills'))
-
-  skillsWindow.on('closed', () => {
-    skillsWindow = null
-  })
+    () => skillsWindow,
+    (win) => { skillsWindow = win }
+  )
 }
 
 export function getSkillsWindow(): BrowserWindow | null {
@@ -482,32 +382,18 @@ export function getSkillsWindow(): BrowserWindow | null {
 
 // ── Agent Cron 管理窗口 ───────────────────────
 export function openAgentCronWindow(): void {
-  if (agentCronWindow && !agentCronWindow.isDestroyed()) {
-    if (agentCronWindow.isMinimized()) agentCronWindow.restore()
-    agentCronWindow.show()
-    agentCronWindow.focus()
-    return
-  }
-
-  agentCronWindow = new BrowserWindow({
-    width: 860,
-    height: 720,
-    minWidth: 620,
-    minHeight: 520,
-    title: '小小牛马 · Agent Cron',
-    resizable: true,
-    webPreferences: {
-      preload: path.join(__dirname, '../preload/index.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
+  createOrFocusSubWindow(
+    {
+      hash: '/agent-cron',
+      title: '小小牛马 · Agent Cron',
+      width: 860,
+      height: 720,
+      minWidth: 620,
+      minHeight: 520,
     },
-  })
-
-  agentCronWindow.loadURL(getRendererURL('/agent-cron'))
-
-  agentCronWindow.on('closed', () => {
-    agentCronWindow = null
-  })
+    () => agentCronWindow,
+    (win) => { agentCronWindow = win }
+  )
 }
 
 export function getAgentCronWindow(): BrowserWindow | null {

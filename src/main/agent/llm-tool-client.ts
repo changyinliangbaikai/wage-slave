@@ -500,7 +500,7 @@ function parseFallbackToolCalls(rawContent: string): { content: string; toolCall
         const tc = extractToolCall(parsed as Record<string, unknown>, `react_block_${Date.now()}_${idx++}`)
         if (tc) toolCalls.push(tc)
       }
-    } catch (e) {
+    } catch {
       // 静默忽略非 JSON 代码块
     }
   }

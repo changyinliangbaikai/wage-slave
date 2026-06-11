@@ -29,8 +29,8 @@ import { ToolCallCard } from './agent/ToolCallCard'
 import { AgentInput } from './agent/AgentInput'
 import { useFileAttachments } from '../hooks/useFileAttachments'
 import { AttachmentList } from '../components/AttachmentList'
+import MessageCopyButton from '../components/MessageCopyButton'
 // 复用 Agent 样式中的工具卡片 / 输入框 / 配色变量（.agent-tool-card / .agent-input / --agent-*）
-import './AgentChat.css'
 import './Chat.css'
 
 export default function Chat() {
@@ -279,10 +279,13 @@ function EmptyState({ mode }: { mode: ChatMode }) {
 // 消息项
 // ─────────────────────────────────────────────
 function MessageItem({ message }: { message: UIChatMessage }) {
+  const copyText = getMessageCopyText(message)
+
   if (message.role === 'user') {
     return (
       <div className="chat-msg chat-msg--user">
         <div className="chat-msg__bubble">
+          <MessageCopyButton text={copyText} />
           {message.content}
           {/* 显示附件列表 */}
           {message.attachments && message.attachments.length > 0 && (
@@ -312,6 +315,7 @@ function MessageItem({ message }: { message: UIChatMessage }) {
           )}
           {message.content && (
             <div className="chat-msg__content">
+              <MessageCopyButton text={copyText} />
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
             </div>
           )}
@@ -326,6 +330,15 @@ function MessageItem({ message }: { message: UIChatMessage }) {
   }
 
   return null
+}
+
+function getMessageCopyText(message: UIChatMessage): string {
+  const parts: string[] = []
+  if (message.content.trim()) parts.push(message.content)
+  if (message.attachments?.length) {
+    parts.push(message.attachments.map(att => `[附件] ${att.fileName}`).join('\n'))
+  }
+  return parts.join('\n\n')
 }
 
 function ReasoningBlock({ content }: { content: string }) {

@@ -1,113 +1,115 @@
-# 小小牛马 🐱
+# Xiao Niu Ma (小小牛马) 🐱
 
-> 人生得意须尽欢，莫使金樽空对月。  -- 李白
+> "Life is short, make it sweet." — Inspired by Li Bai
 
-一只陪你上班的桌面像素橘猫助手
+A desktop pixel cat helper to accompany you at work.
 
-![像素猫预览](docs/imgs/cat_happy_2.png)
+📖 **中文版文档**：关于本项目的中译指南，请参阅 [README_CN.md](README_CN.md)。  
+*(For the Chinese version, please refer to [README_CN.md](README_CN.md).)*
 
----
-
-## 关于工作这件事
-
-我们被教导要努力工作，要高效，要产出。
-
-但很少有人告诉我们：**你在为谁工作？**
-
-一天的开始，你坐在工位上，打开电脑。一天结束，你关上电脑，离开工位。这中间的八小时、十小时、十二小时，你去哪儿了？
-
-你完成了任务，回复了邮件，参加了会议。但这些事情，真的构成了你的一天吗？
-
-有时候你会恍惚：我明明忙了一整天，为什么感觉什么都没做？
-
-**这不是你的问题。这是现代工作的本质——它吞噬时间，却不留下痕迹。**
+![Pixel Cat Preview](docs/imgs/cat_happy_2.png)
 
 ---
 
-## 我们为什么迷失
+## About the Thing Called "Work"
 
-工作本该是生活的一部分，现在却成了生活的全部。
+We are taught to work hard, to be efficient, and to deliver output.
 
-早上醒来，第一件事是看工作消息；晚上睡前，最后一件事还是在想工作。
+But rarely does anyone ask us: **Who are you working for?**
 
-周末本该休息，却因为一周的疲惫而什么也不想做。
+At the start of the day, you sit at your desk and open your computer. At the end of the day, you close it and leave. In between those 8, 10, or 12 hours—where did *you* go?
 
-月末写总结，你翻遍了聊天记录和邮件，却拼凑不出这个月的样子。
+You completed tasks, replied to emails, and attended meetings. But did these things truly make up your day?
 
-**你变成了一个工具，而不是使用工具的人。**
+Sometimes you feel lost: *I was clearly busy all day, so why do I feel like I accomplished nothing?*
 
----
-
-## 小小牛马想告诉你什么
-
-这不是一个帮你"更高效工作"的工具。
-
-**这是一个提醒你"你还活着"的工具。**
-
-它不会让你成为更好的牛马。它想让你意识到：**你不必是牛马。**
-
+**This is not your fault. This is the nature of modern work—it devours time without leaving a trace.**
 
 ---
 
-## 关于记录的意义
+## Why We Get Lost
 
-我们记录，不是为了证明我们做了什么。
+Work was meant to be a part of life, but now it has become all of it.
 
-我们记录，是为了**看见自己**。
+The first thing you do when you wake up is check work notifications. The last thing you think about before sleeping is work.
 
-在忙碌的洪流中，我们很容易忘记自己是谁，忘记了时间的流逝，忘记了生活的质感。
+Weekends are meant for rest, but you are so exhausted from the week that you don't want to do anything at all.
 
-小小牛马帮你记录，不是为了让你向谁交代，而是让你在某个时刻，能够停下来，看看自己走过的路。
+When writing monthly summaries, you sift through chats and emails but still can't piece together what your month actually looked like.
 
-**这些记录，是你生命的痕迹。**
-
----
-
-## 我们真正想说的
-
-我们希望有一天，你不需要这个工具。
-
-我们希望有一天，你能够清楚地知道自己在做什么，为什么而做。
-
-我们希望有一天，你能够按时下班，享受周末，拥有真正属于自己的时间。
-
-我们希望有一天，你不再是牛马，而是你自己。
-
-**但在那一天到来之前，小小牛马会陪着你。**
+**You have become a tool, rather than the person using it.**
 
 ---
 
-## 数据安全
+## What Xiao Niu Ma Wants to Tell You
 
-所有数据都存在你的本地电脑，不会上传到任何服务器。
+This is not a tool to help you "work more efficiently."
 
-API Key 存储在系统的凭证管理器中（Windows Credential Manager / macOS Keychain），不会写入任何文件。
+**This is a tool to remind you that "you are still alive."**
 
-你的工作日志、待办清单，都只是普通的 JSON 文件，随时可以查看和备份。
-
----
-
-## 功能特性
-
-- **晨间问候**：到达上班时间自动弹出，用自然语言输入今日计划，AI 自动解析为待办清单
-- **休息提醒**：监测连续使用时长，超过阈值弹出提醒，支持「再等一会儿」
-- **晚间复盘**：下班时弹出，对照待办清单确认完成情况并记录工作日志
-- **周期总结**：月末/季末读取本地日志，调用 AI 一键生成工作总结
-- **像素橘猫**：常驻桌面，可拖动，拖至屏幕边缘自动收起，支持多种动画状态
-- **兼容主流 LLM**：支持所有 OpenAI API 格式的接口（OpenAI、Claude、DeepSeek、本地 Ollama 等）
-- **小工具箱**：内置实用小工具，包括错别字检查、定时任务管理等
-- **AI Agent**：新增 AI Agent 功能，支持多轮对话和工具调用，可自主规划并执行文件操作、命令执行、定时任务管理等任务
-- **技能中心**：支持内置技能、文件/zip/URL 安装、市场搜索筛选、详情查看和一键安装
-- **Agent Cron**：独立 Agent 定时工作流，支持模板、幂等迁移旧任务、定时触发后让 Agent 自主规划和执行
-- **安全增强**：命令黑名单、用户二次确认、工具权限开关等多重安全保护
+It won't make you a better wage slave. It wants you to realize: **You don't have to be one.**
 
 ---
 
-## 开发文档
+## The Meaning of Logging
 
-- [启动说明](docs/startup.md)
-- [开发指南](docs/develop.md)
-- [小工具文档](docs/tools.md)
+We do not write logs to prove what we have done.
+
+We write them to **see ourselves**.
+
+In the flood of busyness, it is so easy to forget who we are, to lose track of time, and to forget the texture of living.
+
+Xiao Niu Ma helps you log your day, not so you can report it to someone else, but so that at some point, you can stop, look back, and see the path you have walked.
+
+**These records are the footprints of your life.**
+
+---
+
+## What We Truly Want to Say
+
+We hope that one day, you won't need this tool anymore.
+
+We hope that one day, you will know exactly what you are doing and why you are doing it.
+
+We hope that one day, you can log off on time, enjoy your weekends, and have time that truly belongs to you.
+
+We hope that one day, you will no longer be a wage slave, but just yourself.
+
+**But until that day comes, Xiao Niu Ma will be here to keep you company.**
+
+---
+
+## Data Security
+
+- All data is stored locally on your machine and will never be uploaded to any server.
+- API Keys are securely stored in the system credential manager (Windows Credential Manager / macOS Keychain) and are never written to files.
+- Your work logs and todo lists are saved as standard JSON files, which you can view or back up at any time.
+
+---
+
+## Features
+
+- **Morning Greetings**: Automatically pops up at the start of work. Input your plan in natural language and the AI will parse it into a structured Todo list.
+- **Break Reminders**: Monitors continuous mouse and keyboard usage, reminding you to take a break when threshold is reached. Supports "Snooze".
+- **Evening Reviews**: Pops up at the end of work to check off todos and record your daily log.
+- **Periodic Summary**: Reads local logs to generate AI-driven monthly or quarterly work summaries.
+- **Pixel Orange Cat**: Drags anywhere on the desktop, auto-hides at screen edges, and changes animation states based on application activity (Idle, Petting, Celebrate, Busy).
+- **LLM Compatibility**: Supports any OpenAI API-compatible services (OpenAI, Claude, DeepSeek, local Ollama, etc.).
+- **Utility Toolbox**: Built-in useful utilities including Spell Check (LLM-based) and a local Shell Task Scheduler.
+- **AI Agent**: Autonomously plans and executes local file management, terminal command execution, and task scheduling using multi-round ReAct loops.
+- **Skill Center**: Search, install, configure, and uninstall skills from the market or via files/zips/URLs.
+- **Agent Cron**: Runs independent Agent-driven workflows on cron schedules, allowing the Agent to autonomously plan tasks when triggered.
+- **Security Guard**: Built-in safety guards including command blacklists, double-confirmations for sensitive actions, and tool permission controls.
+
+---
+
+## Documentation
+
+- [Development and Startup Guide](docs/develop.md)
+- [Architecture Guide](docs/architecture.md)
+- [Utility Toolbox Guide](docs/tools.md)
+- [Agent Tools Guide](docs/agent-tools.md)
+- [Pet Pack Specification](docs/pet-pack-spec.md)
 
 ---
 

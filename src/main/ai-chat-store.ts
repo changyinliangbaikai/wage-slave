@@ -40,7 +40,7 @@ function readJSON<T>(filePath: string, fallback: T): T {
 
 function sessionFile(id: string): string {
   // 防止 id 带路径穿越
-  const safe = id.replace(/[^a-zA-Z0-9_\-]/g, '')
+  const safe = id.replace(/[^a-zA-Z0-9_-]/g, '')
   return path.join(CHATS_DIR, `${safe}.json`)
 }
 

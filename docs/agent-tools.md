@@ -39,10 +39,14 @@
 
 ## 定时任务工具
 
+> [!NOTE]
+> 这里的定时任务工具（`scheduler_*`）操作的是普通定时任务管理器（用于周期性地在后台 `spawn` 执行 Shell 命令行）。
+> Agent 定时任务（Agent Cron）已与此解耦，运行于独立的调度器中，不在此工具集的控制范围内。
+
 | 工具 | 参数 | 示例 | 安全说明 |
 |------|------|------|----------|
 | `scheduler_list_tasks` | 无 | 查看全部定时任务 | 只读 |
-| `scheduler_create_task` | `name`, `kind`, `schedule_type`, `user_input?`, `command?`, `work_dir?`, `interval_minutes?`, `time?`, `week_day?`, `enabled?` | 创建每天 9:30 的 Agent 提醒 | 写入应用内调度器，会审计 |
+| `scheduler_create_task` | `name`, `kind`, `schedule_type`, `user_input?`, `command?`, `work_dir?`, `interval_minutes?`, `time?`, `week_day?`, `enabled?` | 创建每天 9:30 的 Shell 脚本执行 | 写入 Shell 调度器，仅调度 Shell 任务，会审计 |
 | `scheduler_update_task` | `id` 加要更新的字段 | 修改任务时间 | 会审计 |
 | `scheduler_delete_task` | `id` | 删除任务 | 删除前应先由 Agent 向用户确认，会审计 |
 | `scheduler_toggle_task` | `id` | 启用或停用任务 | 会审计 |

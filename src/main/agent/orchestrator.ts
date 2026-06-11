@@ -205,7 +205,7 @@ export class AgentOrchestrator {
           })),
         })
 
-        const toolResults = await this.executeAllTools(result.toolCalls, opts.callbacks)
+        const toolResults = await this.executeAllTools(result.toolCalls, opts.callbacks, this.abortController?.signal)
         this.stats.toolCalls += toolResults.length
 
         // 把 tool 结果作为 role=tool 消息追加
@@ -297,6 +297,7 @@ export class AgentOrchestrator {
   private async executeAllTools(
     toolCalls: AgentToolCall[],
     cb: AgentCallbacks,
+    signal?: AbortSignal,
   ): Promise<AgentToolResult[]> {
     const results: AgentToolResult[] = []
     for (const tc of toolCalls) {
@@ -306,7 +307,7 @@ export class AgentOrchestrator {
         toolName: tc.name,
       })
 
-      const result = await executeTool(tc)
+      const result = await executeTool(tc, signal)
       results.push(result)
 
       cb.onToolExecuted({

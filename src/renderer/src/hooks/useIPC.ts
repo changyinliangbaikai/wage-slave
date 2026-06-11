@@ -86,8 +86,6 @@ export const exportSummaryDocx = (text: string, periodLabel: string) =>
 export const openSettings = () => api.send(IPC.OPEN_SETTINGS)
 export const openLogs = () => api.send(IPC.OPEN_LOGS)
 export const openTools = () => api.send(IPC.OPEN_TOOLS)
-export const openAIChat = () => api.send(IPC.OPEN_AI_CHAT)
-export const openAgentChat = () => api.send(IPC.AGENT_OPEN_WINDOW)
 /** 打开统一对话窗口（AI 对话 + Agent 合并，#/chat） */
 export const openChat = () => api.send(IPC.CHAT_OPEN_WINDOW)
 export const openSkills = () => api.send(IPC.SKILL_OPEN_WINDOW)

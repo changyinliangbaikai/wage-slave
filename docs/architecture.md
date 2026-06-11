@@ -40,13 +40,14 @@ xiao-niu-ma/
 | **窗口管理** | `windows.ts` | 创建和管理所有窗口（主窗口、设置、日志、工具、AI对话） |
 | **系统托盘** | `tray.ts` | 系统托盘图标和右键菜单 |
 | **数据存储** | `store.ts` | 本地数据读写（配置、日志、待办、状态） |
-| **IPC 处理** | `ipc-handlers.ts` | 注册所有 IPC 处理器，协调主进程与渲染进程通信 |
+| **IPC 分发** | `ipc-handlers.ts` | IPC 处理器入口分发中心，只做挂载引导不含具体业务 |
+| **领域 IPC** | `ipc/` 目录 | 拆分后的专有领域处理器（`config`, `data`, `window`, `tools`, `scheduler`, `skills`, `agent-cron`） |
+| **对话 IPC** | `ipc-handlers-chat.ts` | 统一对话系统（CHAT_*）处理器，支持普通 chat 与 agent 的分流 |
+| **附件 IPC** | `ipc-handlers-attachment.ts` | 对话附件（ATTACHMENT_*）读写处理器 |
 | **定时触发** | `scheduler.ts` | 晨间/晚间定时触发器（上下班时间检测） |
 | **活跃监测** | `activity-monitor.ts` | 键鼠活跃监测（休息提醒） |
 | **LLM 服务** | `llm-service.ts` | LLM API 调用（计划解析、总结生成） |
-| **AI 对话** | `ai-chat-service.ts` | AI 快速对话流式服务 |
-| **AI 存储** | `ai-chat-store.ts` | AI 对话会话持久化 |
-| **AI 附件** | `ai-chat-attachments.ts` | AI 对话附件处理（文件读取） |
+| **对话服务** | `chat/` 目录 | 包含统一对话引擎 `dialogue-service.ts` 与会话存储包装 `chat-store.ts` |
 | **自动更新** | `auto-updater.ts` | 基于 electron-updater 的自动更新 |
 | **备份恢复** | `backup.ts` | 数据备份与恢复（导出/导入 zip） |
 | **Word 导出** | `docx-export.ts` | 工作总结导出为 Word 文档 |
@@ -73,7 +74,7 @@ xiao-niu-ma/
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| **工具入口** | `index.ts` | 工具模块 IPC 路由 |
+| **IPC 注册** | `ipc-handlers.ts` | 注册工具窗口与小工具相关 IPC 路由 |
 | **错别字检查** | `spell-check.ts` | 文本错别字检查（流式） |
 | **定时任务** | `task-scheduler.ts` | 普通定时任务调度引擎，保留 shell 与历史 Agent 任务体兼容 |
 
@@ -108,8 +109,7 @@ xiao-niu-ma/
 | **设置** | `Settings.tsx` | 应用配置页面（工作时间、LLM 配置、快捷键等） |
 | **日志查看** | `LogViewer.tsx` | 工作日志历史查看 |
 | **小工具** | `ToolsPage.tsx` | 小工具入口页面 |
-| **AI 对话** | `AIChat.tsx` | AI 快速对话窗口 |
-| **Agent 对话** | `AgentChat.tsx` | Agent 独立对话窗口，展示流式回复与工具调用卡片 |
+| **统一对话** | `Chat.tsx` | AI 快速对话与 Agent 模式的统一页面入口 |
 | **技能中心** | `SkillsPage.tsx` | Skill 搜索、启停、配置、卸载、文件/zip/URL 安装与市场浏览 |
 | **Agent Cron** | `agent/AgentCronPage.tsx` | Agent Cron 管理页，支持模板、编辑、立即执行，以及保留或停用原任务的迁移 |
 | **晨间流程** | `MorningFlow.tsx` | 晨间计划录入流程 |
@@ -117,23 +117,14 @@ xiao-niu-ma/
 | **晚间流程** | `EveningFlow.tsx` | 晚间复盘流程 |
 | **总结流程** | `SummaryFlow.tsx` | 工作总结生成流程 |
 
-#### AI 对话子模块（ai-chat/）
+#### 对话子模块（ai-chat/ 与 agent/）
 
 | 文件 | 职责 |
 |------|------|
-| `personas.ts` | AI 对话预置角色定义 |
-| `slash-commands.ts` | AI 对话斜杠命令 |
-
-#### Agent 子模块（agent/）
-
-| 文件 | 职责 |
-|------|------|
-| `AgentInput.tsx` | Agent 多行输入框与停止按钮 |
-| `ToolCallCard.tsx` | 工具调用状态卡片 |
-| `AgentSettings.tsx` | Agent 模型、工具权限、路径白名单编辑和安全策略设置 |
-| `SkillManager.tsx` | 已安装 Skill 搜索、启停、配置、卸载、文件/zip/URL 安装 |
-| `SkillMarket.tsx` | Skill 市场搜索、分类筛选、详情查看与安装 |
-| `AgentCronPage.tsx` | Agent Cron 列表、模板、编辑、立即执行，以及保留或停用原任务的迁移 |
+| `ai-chat/personas.ts` | AI 对话预置角色定义 |
+| `ai-chat/slash-commands.ts` | AI 对话斜杠命令 |
+| `agent/AgentInput.tsx` | 统一对话输入框与停止按钮组件 |
+| `agent/ToolCallCard.tsx` | Agent 模式下工具调用卡片渲染组件 |
 
 #### 组件（components/）
 
@@ -158,7 +149,8 @@ xiao-niu-ma/
 | **IPC 封装** | `useIPC.ts` | 封装 IPC 调用（配置、数据、窗口操作） |
 | **心情系统** | `useCatMood.ts` | 像素猫心情/饥饿度系统 |
 | **LLM 封装** | `useLLM.ts` | LLM 调用封装 |
-| **Agent 封装** | `useAgent.ts` | Agent 会话、流式事件、工具调用状态管理 |
+| **统一对话** | `useChat.ts` | 驱动统一对话（Chat/Agent）的数据流与事件分流管理 |
+| **附件管理** | `useFileAttachments.ts` | 对话文件附件管理 Hook |
 | **Skill 封装** | `useSkills.ts` | Skill 列表、搜索、安装、市场和变更事件管理 |
 
 #### 桌宠渲染引擎（pet-engine/）
@@ -286,25 +278,28 @@ App.tsx 接收事件 (useOnEveningTrigger)
 ### 5. AI 对话流程
 
 ```
-用户打开 AI 对话窗口 (openAIChatWindow)
+### 5. 统一对话与 Agent 流程
+
+```
+用户打开统一对话窗口 (openChatWindow)
   ↓
-AIChat.tsx 渲染
+Chat.tsx 渲染并根据历史恢复会话
   ↓
-用户输入消息
+用户输入消息并发送（选择 chat 聊天或 agent 助理模式）
   ↓
-通过 IPC 发送 AI_CHAT_START
+通过 IPC 发送 CHAT_START 通道
   ↓
-ai-chat-service.ts 发起流式请求
+ipc-handlers-chat.ts 拦截并挂载 DialogueService
   ↓
-调用 OpenAI 兼容 API（SSE）
+DialogueService 分流至普通 AI 问答或 Orchestrator Agent 循环
   ↓
-流式推送 AI_CHAT_CHUNK 事件
+Orchestrator 迭代：调用 API -> 返回 tool_calls -> 执行 tool-executor -> 回灌
   ↓
-渲染进程实时显示
+在此期间流式向渲染进程发送 CHAT_CHUNK / CHAT_TOOL_EVENT
   ↓
-请求完成，发送 AI_CHAT_DONE 事件
+渲染进程 useChat.ts 监听到通道事件，驱动渲染 ToolCallCard 或打字机效果
   ↓
-保存会话 (AI_CHAT_SAVE_SESSION)
+完成后发送 CHAT_DONE，并将完整对话以 chat-store 序列化存盘
 ```
 
 ### 6. 工作总结生成流程
@@ -347,10 +342,10 @@ docx-export.ts 生成 Word 文档
 | `TRIGGER_SUMMARY` | 总结提示触发 |
 | `CAT_STATE_CHANGE` | 猫咪状态变化 |
 | `LLM_SUMMARY_STREAM` | 总结流式推送 |
-| `AI_CHAT_CHUNK` | AI 对话流式推送 |
-| `AI_CHAT_DONE` | AI 对话完成 |
-| `AI_CHAT_ERROR` | AI 对话错误 |
-| `AI_CHAT_FOCUS_INPUT` | 聚焦输入框 |
+| `CHAT_CHUNK` | 统一对话流式字词推送 |
+| `CHAT_TOOL_EVENT` | Agent 工具调用状态变化推送（开始、执行中、完成、失败） |
+| `CHAT_DONE` | 统一对话流式完成 |
+| `CHAT_ERROR` | 统一对话流式异常错误 |
 | `TOOLS_SPELL_CHECK_CHUNK` | 错别字检查流式推送 |
 | `UPDATE_STATUS` | 更新状态推送 |
 
@@ -364,8 +359,9 @@ docx-export.ts 生成 Word 文档
 | **导出** | `EXPORT_SUMMARY_DOCX`, `SELECT_DIRECTORY` |
 | **小工具** | `TOOLS_OPEN_FILE_DIALOG`, `TOOLS_READ_FILE`, `TOOLS_SPELL_CHECK` |
 | **定时任务** | `SCHEDULER_LIST_TASKS`, `SCHEDULER_SAVE_TASK`, `SCHEDULER_DELETE_TASK` 等 |
-| **AI 对话** | `AI_CHAT_START`, `AI_CHAT_STOP`, `AI_CHAT_LIST_SESSIONS` 等 |
-| **窗口行为** | `WINDOW_DRAG`, `WINDOW_HIDE_EDGE`, `WINDOW_SHOW` |
+| **统一对话** | `CHAT_OPEN_WINDOW`, `CHAT_START`, `CHAT_STOP`, `CHAT_LIST_SESSIONS`, `CHAT_GET_SESSION`, `CHAT_DELETE_SESSION`, `CHAT_RENAME_SESSION` |
+| **附件管理** | `ATTACHMENT_PICK` (拉起选择), `ATTACHMENT_READ` (获取临时解析数据) |
+| **窗口行为** | `WINDOW_DRAG`, `WINDOW_HIDE_EDGE`, `WINDOW_SHOW`, `WINDOW_GET_POSITION` 等 |
 | **系统** | `AUTO_LAUNCH_SET`, `SNOOZE_BREAK`, `BREAK_DONE`, `OPEN_SETTINGS` 等 |
 | **自动更新** | `UPDATE_CHECK`, `UPDATE_DOWNLOAD`, `UPDATE_INSTALL` |
 | **备份恢复** | `BACKUP_EXPORT`, `BACKUP_IMPORT`, `BACKUP_OPEN_DATA_DIR`, `REPORT_SAVE` |
@@ -451,18 +447,10 @@ index.ts
 ├── tray.ts
 ├── scheduler.ts
 ├── activity-monitor.ts
-├── ipc-handlers.ts
-│   ├── store.ts
-│   ├── windows.ts
-│   ├── activity-monitor.ts
-│   ├── llm-service.ts
-│   ├── ai-chat-service.ts
-│   ├── ai-chat-store.ts
-│   ├── ai-chat-attachments.ts
-│   ├── docx-export.ts
-│   └── tools/
-│       ├── spell-check.ts
-│       └── task-scheduler.ts
+├── ipc-handlers.ts (注册分发)
+│   ├── ipc/ (config, data, window, tools, scheduler, skills, agent-cron)
+│   ├── ipc-handlers-chat.ts
+│   └── ipc-handlers-attachment.ts
 ├── auto-updater.ts
 └── backup.ts
 ```
@@ -487,10 +475,11 @@ main.tsx
 ├── LogViewer.tsx
 ├── ToolsPage.tsx
 │   └── components/Tools/
-└── AIChat.tsx
-    └── ai-chat/
-        ├── personas.ts
-        └── slash-commands.ts
+└── Chat.tsx
+    ├── hooks/useChat.ts
+    ├── hooks/useFileAttachments.ts
+    ├── components/agent/AgentInput.tsx
+    └── components/agent/ToolCallCard.tsx
 ```
 
 ---

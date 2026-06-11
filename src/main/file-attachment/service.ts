@@ -428,3 +428,23 @@ export class FileAttachmentService {
 
 // 单例导出
 export const fileAttachmentService = new FileAttachmentService()
+
+/**
+ * 统一的文档文本提取函数，根据后缀自动路由到对应的解析器
+ */
+export async function extractFileContent(
+  filePath: string,
+  maxChars: number
+): Promise<{ content: string; charCount: number; truncated: boolean }> {
+  const ext = path.extname(filePath).toLowerCase()
+  if (ext === '.docx' || ext === '.doc') {
+    return extractDocxFile(filePath, maxChars)
+  } else if (ext === '.pdf') {
+    return extractPdfFile(filePath, maxChars)
+  } else if (ext === '.xlsx' || ext === '.xls') {
+    return extractExcelFile(filePath, maxChars)
+  } else {
+    return extractTextFile(filePath, maxChars)
+  }
+}
+

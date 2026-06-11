@@ -74,7 +74,7 @@ const SUMMARY_SYSTEM = `你是一个专业的工作总结撰写助手。
 
 function extractJSON(text: string): string {
   // 1. 去掉 <think>...</think> 推理块（MiniMax 等模型会返回）
-  let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
 
   // 2. 尝试提取 ```json ... ``` 代码块
   const codeBlock = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/)

@@ -11,7 +11,7 @@
  *  - 命令编码：复用 task-scheduler 的 decodeProcessOutput 思路
  */
 
-import { spawn } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import * as fs from 'fs/promises'
 import * as fsSync from 'fs'
 import * as path from 'path'
@@ -38,6 +38,7 @@ import {
 import { assertSafePath, expandHome, checkCommand, confirmCommandWithUser } from './security'
 import { isToolEnabled } from './tool-registry'
 import { recordAgentAudit } from './audit-log'
+import { extractFileContent } from '../file-attachment/service'
 import {
   getAllSkills,
   getSkillById,
@@ -58,7 +59,7 @@ const MAX_COMMAND_BUFFER = 4 * 1024 * 1024
  * 工具执行入口
  * 接收 LLM 解析后的 toolCall，分发到对应实现，统一封装结果
  */
-export async function executeTool(call: AgentToolCall): Promise<AgentToolResult> {
+export async function executeTool(call: AgentToolCall, signal?: AbortSignal): Promise<AgentToolResult> {
   const startTime = Date.now()
 
   try {
@@ -79,7 +80,7 @@ export async function executeTool(call: AgentToolCall): Promise<AgentToolResult>
       case 'list_files':   raw = await toolListFiles(call.arguments); break
       case 'search_files': raw = await toolSearchFiles(call.arguments); break
       // 命令执行
-      case 'run_command':  raw = await toolRunCommand(call.arguments); break
+      case 'run_command':  raw = await toolRunCommand(call.arguments, signal); break
       // 小牛马数据操作
       case 'get_today_log':  raw = await toolGetTodayLog(); break
       case 'get_todos':      raw = await toolGetTodos(); break
@@ -157,9 +158,30 @@ async function toolReadFile(args: unknown): Promise<string> {
     ? Math.floor(max_lines)
     : DEFAULT_READ_FILE_LINES
   const safeMaxLines = clamp(requestedLines, 1, MAX_READ_FILE_LINES)
-  const { lines, truncated } = await readFileLines(target, safeOffset, safeMaxLines)
+
+  const ext = path.extname(target).toLowerCase()
+  const isBinaryDoc = ['.docx', '.doc', '.pdf', '.xlsx', '.xls'].includes(ext)
+
+  let lines: string[]
+  let truncated = false
+
+  if (isBinaryDoc) {
+    // 对于二进制文档，提取出解析后的文本，按行切分后执行 offset 和 maxLines 过滤
+    // 限制单次提取最大 100,000 字符，防止把内存撑爆
+    const { content } = await extractFileContent(target, 100000)
+    const allLines = content.split('\n')
+    lines = allLines.slice(safeOffset, safeOffset + safeMaxLines)
+    truncated = safeOffset + safeMaxLines < allLines.length
+  } else {
+    // 普通文本文件按原有流式方法读取
+    const res = await readFileLines(target, safeOffset, safeMaxLines)
+    lines = res.lines
+    truncated = res.truncated
+  }
+
+  const docTypeDesc = isBinaryDoc ? ` [已解析文档]` : ''
   const note = [
-    `[文件: ${target}] 第 ${safeOffset + 1}-${safeOffset + lines.length} 行，最多读取 ${safeMaxLines} 行`,
+    `[文件: ${target}${docTypeDesc}] 第 ${safeOffset + 1}-${safeOffset + lines.length} 行，最多读取 ${safeMaxLines} 行`,
     max_lines === undefined ? `未指定 max_lines，已使用默认限制 ${DEFAULT_READ_FILE_LINES} 行` : '',
     requestedLines > MAX_READ_FILE_LINES ? `max_lines 超过上限，已限制为 ${MAX_READ_FILE_LINES} 行` : '',
     truncated ? `后续内容已省略；可用 offset=${safeOffset + lines.length} 继续分块读取` : '',
@@ -288,7 +310,7 @@ async function toolSearchFiles(args: unknown): Promise<string> {
 
 interface RunCommandArgs { command: string; work_dir?: string; timeout_ms?: number }
 
-async function toolRunCommand(args: unknown): Promise<string> {
+async function toolRunCommand(args: unknown, signal?: AbortSignal): Promise<string> {
   const { command, work_dir, timeout_ms } = pickArgs<RunCommandArgs>(args, ['command'])
 
   // 第一道防线：黑名单（命令边界正则）
@@ -322,7 +344,7 @@ async function toolRunCommand(args: unknown): Promise<string> {
     summary: preview(command, 200),
   })
 
-  const result = await spawnShellCommand(command, { cwd, timeoutMs: timeout, maxBuffer: MAX_COMMAND_BUFFER })
+  const result = await spawnShellCommand(command, { cwd, timeoutMs: timeout, maxBuffer: MAX_COMMAND_BUFFER }, signal)
   const out = decodeProcessOutput(result.stdout)
   const err = decodeProcessOutput(result.stderr)
   const combined = [out, err].filter(Boolean).join('\n').trim()
@@ -354,11 +376,42 @@ interface SpawnCommandResult {
   exceededBuffer: boolean
 }
 
-function spawnShellCommand(command: string, options: SpawnCommandOptions): Promise<SpawnCommandResult> {
+/** 安全地杀死子进程及其派生的所有子子进程 */
+function killProcess(child: ChildProcess): void {
+  const pid = child.pid
+  if (!pid) {
+    child.kill()
+    return
+  }
+  if (process.platform === 'win32') {
+    try {
+      const killer = spawn('taskkill', ['/pid', pid.toString(), '/T', '/F'])
+      killer.on('error', (err) => {
+        log.warn(`[AgentTool] Windows taskkill 异步报错:`, err)
+        child.kill()
+      })
+    } catch {
+      child.kill()
+    }
+  } else {
+    try {
+      process.kill(-pid, 'SIGTERM')
+    } catch {
+      child.kill()
+    }
+  }
+}
+
+function spawnShellCommand(
+  command: string,
+  options: SpawnCommandOptions,
+  signal?: AbortSignal,
+): Promise<SpawnCommandResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, {
       cwd: options.cwd,
       shell: true,
+      detached: true,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
@@ -369,38 +422,68 @@ function spawnShellCommand(command: string, options: SpawnCommandOptions): Promi
     let stderrBytes = 0
     let timedOut = false
     let exceededBuffer = false
+    let isFinished = false
+
+    const cleanUp = () => {
+      isFinished = true
+      clearTimeout(timer)
+      if (signal && onAbort) {
+        signal.removeEventListener('abort', onAbort)
+      }
+    }
 
     const killForLimit = () => {
       exceededBuffer = true
-      child.kill()
+      killProcess(child)
     }
 
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill()
+      killProcess(child)
     }, options.timeoutMs)
 
+    let onAbort: (() => void) | null = null
+    if (signal) {
+      if (signal.aborted) {
+        cleanUp()
+        killProcess(child)
+        reject(new Error('Command aborted'))
+        return
+      }
+      onAbort = () => {
+        if (isFinished) return
+        cleanUp()
+        killProcess(child)
+        reject(new Error('Command aborted'))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
+
     child.stdout?.on('data', (chunk: Buffer) => {
+      if (isFinished) return
       stdoutChunks.push(chunk)
       stdoutBytes += chunk.length
       if (stdoutBytes + stderrBytes > options.maxBuffer) killForLimit()
     })
     child.stderr?.on('data', (chunk: Buffer) => {
+      if (isFinished) return
       stderrChunks.push(chunk)
       stderrBytes += chunk.length
       if (stdoutBytes + stderrBytes > options.maxBuffer) killForLimit()
     })
     child.on('error', err => {
-      clearTimeout(timer)
+      if (isFinished) return
+      cleanUp()
       reject(err)
     })
-    child.on('close', (code, signal) => {
-      clearTimeout(timer)
+    child.on('close', (code, signalName) => {
+      if (isFinished) return
+      cleanUp()
       resolve({
         stdout: Buffer.concat(stdoutChunks),
         stderr: Buffer.concat(stderrChunks),
         code,
-        signal,
+        signal: signalName,
         timedOut,
         exceededBuffer,
       })

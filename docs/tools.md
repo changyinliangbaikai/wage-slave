@@ -133,7 +133,7 @@
 2. **后端实现**
    - 在 `src/main/tools/` 下创建实现文件
    - 导出必要的函数
-   - 在 `src/main/tools/index.ts` 中注册 IPC handler
+   - 在 `src/main/ipc/tools.ts` 中注册 IPC handler；通用工具实现保留在 `src/main/tools/`
 
 3. **类型定义**
    - 在 `src/shared/types.ts` 中添加相关类型

@@ -1,0 +1,74 @@
+.message-copy-button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(139, 94, 60, 0.2);
+  border-radius: 7px;
+  background: rgba(255, 254, 247, 0.9);
+  color: #745437;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.62;
+  transition:
+    opacity 0.15s,
+    background 0.15s,
+    border-color 0.15s,
+    color 0.15s,
+    transform 0.15s;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.message-copy-button:hover,
+.message-copy-button:focus-visible {
+  opacity: 1;
+  background: #fffdf2;
+  border-color: rgba(139, 94, 60, 0.42);
+  color: #5f3c20;
+  transform: translateY(-1px);
+}
+
+.message-copy-button:focus-visible {
+  outline: 2px solid rgba(192, 115, 58, 0.32);
+  outline-offset: 2px;
+}
+
+.message-copy-button.is-copied {
+  opacity: 1;
+  background: rgba(77, 124, 50, 0.12);
+  border-color: rgba(77, 124, 50, 0.35);
+  color: #3f7628;
+}
+
+.message-copy-button:disabled {
+  display: none;
+}
+
+.chat-msg--user .message-copy-button,
+.agent-msg--user .message-copy-button {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.32);
+  color: #fff;
+}
+
+.chat-msg--user .message-copy-button:hover,
+.chat-msg--user .message-copy-button:focus-visible,
+.agent-msg--user .message-copy-button:hover,
+.agent-msg--user .message-copy-button:focus-visible {
+  background: rgba(255, 255, 255, 0.3);
+  border-color: rgba(255, 255, 255, 0.54);
+}
+
+.chat-msg--user .message-copy-button.is-copied,
+.agent-msg--user .message-copy-button.is-copied {
+  background: rgba(255, 255, 255, 0.34);
+  border-color: rgba(255, 255, 255, 0.62);
+  color: #fff;
+}

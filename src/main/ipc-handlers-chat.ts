@@ -23,9 +23,22 @@ import { getStoredApiKey } from './api-key'
 /**
  * 注册统一对话 IPC
  */
+// 活跃对话实例表（按 sessionId 支持多会话并发）
+const active = new Map<string, DialogueService>()
+
+/** 强制中断所有活跃的后台对话及 Agent 执行（例如在窗口关闭时） */
+export function abortAllActiveChats(): void {
+  for (const service of active.values()) {
+    try {
+      service.abort()
+    } catch (err) {
+      log.warn('[ChatIPC] 批量中止对话失败:', err)
+    }
+  }
+  active.clear()
+}
+
 export function registerChatIPC(): void {
-  // 活跃对话实例表（按 sessionId 支持多会话并发）
-  const active = new Map<string, DialogueService>()
 
   /** 把推送广播给统一对话窗口 */
   const broadcast = (channel: string, payload: unknown): void => {

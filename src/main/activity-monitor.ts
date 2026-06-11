@@ -20,7 +20,6 @@ let onBreak: BreakCallback | null = null
 let checkInterval: NodeJS.Timeout | null = null
 let snoozedUntil = 0
 let hookLoaded = false
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let hookInstance: any = null
 
 /** 收到键鼠输入时更新时间戳 */
@@ -74,7 +73,6 @@ export function startActivityMonitor(cb: BreakCallback): void {
 
   // 尝试加载 uiohook-napi
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { uIOhook } = require('uiohook-napi')
     uIOhook.on('mousemove', onInput)
     uIOhook.on('keydown', onInput)

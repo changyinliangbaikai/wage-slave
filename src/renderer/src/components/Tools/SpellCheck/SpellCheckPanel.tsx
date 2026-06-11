@@ -140,7 +140,7 @@ export default function SpellCheckPanel({ onBack }: Props) {
       setStatus('idle')
       setErrors([])
       setErrorMsg('')
-    } catch (e) {
+    } catch {
       setErrorMsg('打开文件失败')
       setStatus('error')
     }

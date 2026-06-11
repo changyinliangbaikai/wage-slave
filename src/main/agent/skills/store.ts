@@ -137,7 +137,6 @@ export function loadUserSkills(): AgentSkill[] {
 function parseSkillFromMarkdown(
   content: string,
   skillId: string,
-  skillDir: string,
 ): AgentSkill | null {
   // 解析 YAML frontmatter: ---\n...\n---\n
   const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
@@ -176,7 +175,6 @@ function parseSkillFromMarkdown(
       : [skillId, name]
 
   // 构建 AgentSkill 对象
-  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
   const skill: AgentSkill = {
     id: skillId,
     name,
@@ -235,7 +233,7 @@ export function loadGlobalSkills(): AgentSkill[] {
             }
 
             const content = fs.readFileSync(skillMdPath, 'utf-8')
-            const skill = parseSkillFromMarkdown(content, entry.name, path.join(dir, entry.name))
+            const skill = parseSkillFromMarkdown(content, entry.name)
             if (skill) {
               result.push(skill)
               log.info(`[Skill] 从 SKILL.md 加载全局 skill: ${skill.name} (id=${skill.id})`)
