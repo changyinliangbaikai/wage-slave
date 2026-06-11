@@ -24,6 +24,7 @@ import type {
   AgentToolStartPayload,
   AgentToolExecutingPayload,
   AgentToolExecutedPayload,
+  AIChatAttachment,
 } from '@shared/types'
 
 const DESKTOP_API_UNAVAILABLE_MESSAGE = '当前页面未连接桌面端能力，请在小小牛马桌面应用窗口中使用 Agent。'
@@ -78,7 +79,7 @@ export interface UseAgentResult {
   /** 当前正在执行的工具名（顶部状态栏用） */
   currentTool: string | null
   /** 发送新任务 */
-  sendTask: (input: string) => Promise<void>
+  sendTask: (input: string, attachments?: AIChatAttachment[]) => Promise<void>
   /** 中止当前任务 */
   stopTask: () => Promise<void>
   /** 切换到新会话（生成新的 sessionId） */
@@ -172,20 +173,22 @@ export function useAgent(): UseAgentResult {
   }, [])
 
   /** 发送新任务 */
-  const sendTask = useCallback(async (input: string) => {
+  const sendTask = useCallback(async (input: string, attachments?: AIChatAttachment[]) => {
     const trimmed = input.trim()
-    if (!trimmed) return
+    // 允许「只发送附件不打字」的场景
+    if ((!trimmed && (!attachments || attachments.length === 0))) return
     if (running) return  // UI 层保护：执行中禁止再次提交
 
     const id = sessionIdRef.current
 
-    // 把 user 消息立即加入列表
+    // 把 user 消息立即加入列表（包含附件）
     setMessages(prev => [
       ...prev,
       {
         id: `user_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         role: 'user' as const,
         content: trimmed,
+        attachments: attachments && attachments.length > 0 ? attachments : undefined,
         createdAt: Date.now(),
       },
     ])
@@ -197,6 +200,7 @@ export function useAgent(): UseAgentResult {
       const result = await api.invoke(IPC.AGENT_START, {
         sessionId: id,
         userInput: trimmed,
+        attachments,
       }) as { ok: boolean; sessionId?: string; error?: string }
 
       if (!result?.ok) {

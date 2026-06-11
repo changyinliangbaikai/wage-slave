@@ -88,15 +88,28 @@ export interface AgentSecurityPolicy {
   commandBlacklist: { pattern: string; reason: string }[]
 }
 
-/** AI 对话附件（txt / md / docx / doc 读取后的文本 + 元数据） */
+/** AI 对话附件（txt / md / docx / doc 等读取后的文本 + 元数据） */
 export interface AIChatAttachment {
   id: string
   fileName: string
-  fileType: 'txt' | 'md' | 'docx' | 'doc'
+  fileType: string       // 'txt' | 'md' | 'docx' | 'pdf' | 'js' | 'py' 等
+  mimeType: string       // MIME 类型
   sizeBytes: number      // 原始文件字节数
   content: string        // 提取出来的文本（可能被截断）
   charCount: number      // 原始字符数（截断前）
   truncated: boolean     // 是否因超长被截断
+  truncatedAt?: number   // 截断位置
+  status: 'pending' | 'reading' | 'success' | 'error'
+  error?: string         // 读取错误信息
+  createdAt: number      // 添加时间戳
+}
+
+/** 附件读取结果 */
+export interface AttachmentReadResult {
+  ok: boolean
+  attachments: AIChatAttachment[]
+  errors: Array<{ fileName: string; error: string; code: string }>
+  warnings: Array<{ fileName: string; warning: string; code: string }>
 }
 
 /** AI 对话预置角色模板（邮件助手 / 翻译助手 等） */
@@ -539,6 +552,8 @@ export interface AgentMessage {
   tool_call_id?: string
   /** tool 角色专用：工具名称（便于 UI 渲染） */
   tool_name?: string
+  /** 附件列表（仅 user 消息有；原文内容会在发送时拼接进 prompt） */
+  attachments?: AIChatAttachment[]
   /** 创建时间（毫秒） */
   createdAt: number
 }

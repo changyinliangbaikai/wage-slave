@@ -44,6 +44,8 @@ import { SLASH_COMMANDS, type SlashCommand } from './ai-chat/slash-commands'
 import './AIChat.css'
 // 代码高亮主题（浅色，与米黄色系搭配）
 import 'highlight.js/styles/atom-one-light.css'
+import { useFileAttachments } from '../hooks/useFileAttachments'
+import { AttachmentList } from '../components/AttachmentList'
 
 const api = (window as any).electronAPI
 
@@ -677,8 +679,17 @@ export default function AIChat() {
   // 拖拽高亮
   const [dragOver, setDragOver] = useState(false)
 
-  // 当前正在撰写消息的附件列表（发送后清空）
-  const [attachments, setAttachments] = useState<AIChatAttachment[]>([])
+  // 使用统一的文件附件 Hook
+  const {
+    attachments,
+    isReading,
+    lastErrors,
+    lastWarnings,
+    pickFiles,
+    addFilesFromDrop,
+    removeAttachment,
+    clearAttachments,
+  } = useFileAttachments()
 
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -875,7 +886,7 @@ export default function AIChat() {
 
     setMessages(prev => [...prev, userMsg, assistantMsg])
     setInput('')
-    setAttachments([])                       // 发送后清空附件，下一轮独立
+    clearAttachments()                       // 发送后清空附件，下一轮独立
     setCurrentReqId(reqId)
     setAtBottom(true)                        // 发送消息时视为回到底部
     setTimeout(() => scrollToBottom(false), 0)
@@ -903,7 +914,7 @@ export default function AIChat() {
     sessionCreatedAtRef.current = Date.now()
     setSessionId(nid)
     setMessages([])
-    setAttachments([])                // 切会话时清空附件
+    clearAttachments()                // 切会话时清空附件
     setInput('')
     setError(null)
     setStatusMsg(null)
@@ -927,7 +938,7 @@ export default function AIChat() {
     setSessionId(s.id)
     setMessages(s.messages || [])
     setPersonaId(s.personaId || 'general')
-    setAttachments([])                // 切会话时清空附件
+    clearAttachments()                // 切会话时清空附件
     setInput('')
     setError(null)
     setStatusMsg(null)
@@ -1303,94 +1314,22 @@ export default function AIChat() {
     setTimeout(() => setStatusMsg(null), 2000)
   }, [messages, personaId])
 
-  // ── 附件：把新读到的附件合并到当前列表（去重 + 提示） ─
-  const mergeNewAttachments = useCallback((
-    incoming: AIChatAttachment[],
-    readErrors: Array<{ fileName: string; error: string }>,
-    unsupportedNames: string[],
-  ) => {
-    if (readErrors.length > 0) {
-      setError(`${readErrors.length} 个文件读取失败：` + readErrors.map(e => `${e.fileName}（${e.error}）`).join('；'))
-    }
-    if (incoming.length === 0) {
-      if (unsupportedNames.length > 0) {
-        setStatusMsg(`⚠️ 忽略 ${unsupportedNames.length} 个不支持的格式：${unsupportedNames.join('、')}`)
-        setTimeout(() => setStatusMsg(null), 2500)
-      }
-      return
-    }
-    setAttachments(prev => {
-      const existingNames = new Set(prev.map(a => a.fileName))
-      const added = incoming.filter(a => !existingNames.has(a.fileName))
-      const skipped = incoming.length - added.length
-      const bits: string[] = []
-      if (added.length > 0) bits.push(`已添加 ${added.length} 个附件`)
-      if (skipped > 0) bits.push(`跳过 ${skipped} 个重名`)
-      if (unsupportedNames.length > 0) bits.push(`忽略 ${unsupportedNames.length} 个不支持格式`)
-      setStatusMsg(bits.join('，'))
-      setTimeout(() => setStatusMsg(null), 2500)
-      return [...prev, ...added]
-    })
-  }, [])
-
   // ── 附件：点击 📎 打开文件选择器 ───────────
   const handlePickAttachments = useCallback(async () => {
-    try {
-      const result = await api.invoke(IPC.AI_CHAT_PICK_ATTACHMENTS) as {
-        ok: boolean
-        canceled?: boolean
-        attachments?: AIChatAttachment[]
-        errors?: Array<{ fileName: string; error: string }>
-      }
-      if (!result.ok || result.canceled) return
-      mergeNewAttachments(result.attachments || [], result.errors || [], [])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }, [mergeNewAttachments])
+    await pickFiles()
+  }, [pickFiles])
 
-  // ── 附件：移除/清空 ──────────────────────
+  // ── 附件：移除 ──────────────────────
   const handleRemoveAttachment = useCallback((id: string) => {
-    setAttachments(prev => prev.filter(a => a.id !== id))
-  }, [])
+    removeAttachment(id)
+  }, [removeAttachment])
 
-  // ── 拖拽文件：走附件流程（不再塞到输入框） ───
+  // ── 拖拽文件：走附件流程 ───
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     setDragOver(false)
-    const files = Array.from(e.dataTransfer.files)
-    if (files.length === 0) return
-
-    const paths: string[] = []
-    const unsupported: string[] = []
-    for (const f of files) {
-      const fpath = (f as unknown as { path?: string }).path
-      if (!fpath) {
-        unsupported.push(f.name)
-        continue
-      }
-      const ext = fpath.toLowerCase().split('.').pop() || ''
-      if (['txt', 'md', 'docx', 'doc'].includes(ext)) {
-        paths.push(fpath)
-      } else {
-        unsupported.push(f.name)
-      }
-    }
-    if (paths.length === 0) {
-      mergeNewAttachments([], [], unsupported)
-      return
-    }
-    try {
-      const result = await api.invoke(IPC.AI_CHAT_READ_ATTACHMENTS, paths) as {
-        ok: boolean
-        attachments: AIChatAttachment[]
-        errors: Array<{ fileName: string; error: string }>
-      }
-      mergeNewAttachments(result.attachments || [], result.errors || [], unsupported)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }, [mergeNewAttachments])
+    await addFilesFromDrop(e.dataTransfer.files)
+  }, [addFilesFromDrop])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()

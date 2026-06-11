@@ -31,6 +31,8 @@ import type { AgentSessionMeta } from '@shared/types'
 import { ToolCallCard } from './agent/ToolCallCard'
 import { AgentInput } from './agent/AgentInput'
 import './AgentChat.css'
+import { useFileAttachments } from '../hooks/useFileAttachments'
+import { AttachmentList } from '../components/AttachmentList'
 
 export default function AgentChat() {
   const {
@@ -49,6 +51,19 @@ export default function AgentChat() {
   const [showSessions, setShowSessions] = useState(false)
   const [sessions, setSessions] = useState<AgentSessionMeta[]>([])
   const listRef = useRef<HTMLDivElement>(null)
+  const [dragOver, setDragOver] = useState(false)
+
+  // 使用统一的文件附件 Hook
+  const {
+    attachments,
+    isReading,
+    lastErrors,
+    lastWarnings,
+    pickFiles,
+    addFilesFromDrop,
+    removeAttachment,
+    clearAttachments,
+  } = useFileAttachments()
 
   // 自动滚到底部
   useEffect(() => {
@@ -66,13 +81,16 @@ export default function AgentChat() {
 
   const handleSubmit = async () => {
     const text = input.trim()
-    if (!text) return
+    // 允许「只发送附件不打字」的场景
+    if ((!text && attachments.length === 0)) return
     setInput('')
-    await sendTask(text)
+    await sendTask(text, attachments)
+    clearAttachments()  // 发送后清空附件
   }
 
   const handleSessionClick = async (id: string) => {
     setShowSessions(false)
+    clearAttachments()  // 切换会话时清空附件
     await loadSession(id)
   }
 
@@ -130,12 +148,19 @@ export default function AgentChat() {
       </main>
 
       <footer className="agent-chat__footer">
+        {/* 附件列表 */}
+        <AttachmentList
+          attachments={attachments}
+          onRemove={removeAttachment}
+        />
         <AgentInput
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
           onStop={stopTask}
           running={running}
+          onPickFiles={pickFiles}
+          isReadingFiles={isReading}
         />
       </footer>
 
@@ -184,7 +209,19 @@ function MessageItem({ message }: { message: UIAgentMessage }) {
   if (message.role === 'user') {
     return (
       <div className="agent-msg agent-msg--user">
-        <div className="agent-msg__bubble">{message.content}</div>
+        <div className="agent-msg__bubble">
+          {message.content}
+          {/* 显示附件列表 */}
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="agent-msg__attachments">
+              {message.attachments.map(att => (
+                <span key={att.id} className="agent-msg__attachment" title={att.fileName}>
+                  📎 {att.fileName} {att.truncated && '(已截取)'}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     )
   }

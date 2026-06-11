@@ -8,6 +8,8 @@ interface Props {
   running: boolean
   disabled?: boolean
   placeholder?: string
+  onPickFiles?: () => void
+  isReadingFiles?: boolean
 }
 
 /**
@@ -23,6 +25,8 @@ export function AgentInput({
   running,
   disabled,
   placeholder = '描述你想完成的任务，例如：帮我整理今天的待办并写入日志',
+  onPickFiles,
+  isReadingFiles,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
 
@@ -56,7 +60,20 @@ export function AgentInput({
         disabled={disabled}
       />
       <div className="agent-input__bar">
-        <span className="agent-input__hint">Cmd/Ctrl + Enter 发送 · Shift + Enter 换行</span>
+        <div className="agent-input__left">
+          {onPickFiles && !running && (
+            <button
+              type="button"
+              className="agent-input__btn agent-input__btn--attach"
+              onClick={onPickFiles}
+              disabled={isReadingFiles || disabled}
+              title="添加文件附件"
+            >
+              📎 {isReadingFiles ? '读取中...' : '附件'}
+            </button>
+          )}
+          <span className="agent-input__hint">Cmd/Ctrl + Enter 发送 · Shift + Enter 换行</span>
+        </div>
         {running ? (
           <button type="button" className="agent-input__btn agent-input__btn--stop" onClick={onStop}>
             停止
@@ -66,7 +83,7 @@ export function AgentInput({
             type="button"
             className="agent-input__btn agent-input__btn--send"
             onClick={onSubmit}
-            disabled={disabled || !value.trim()}
+            disabled={disabled || (!value.trim() && !onPickFiles)}
           >
             发送
           </button>

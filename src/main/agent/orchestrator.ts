@@ -24,6 +24,7 @@ import type {
   AgentToolStartPayload,
   AgentToolExecutingPayload,
   AgentToolExecutedPayload,
+  AIChatAttachment,
 } from '@shared/types'
 import { buildSystemPrompt, buildAgentContext } from './system-prompt'
 import { getActiveToolSchemas, getToolDescription } from './tool-registry'
@@ -55,6 +56,8 @@ export interface AgentRunOptions {
   apiKey: string
   /** 历史消息（不含本轮 user） */
   history: AgentMessage[]
+  /** 可选：附件列表 */
+  attachments?: AIChatAttachment[]
   /** 可选：覆盖本次执行的最大迭代轮次 */
   maxIterations?: number
   /** 可选：本次执行超时时间 */
@@ -117,6 +120,7 @@ export class AgentOrchestrator {
       id: genMsgId('user'),
       role: 'user',
       content: opts.userInput,
+      attachments: opts.attachments,
       createdAt: Date.now(),
     }
     this.history.push(userMsg)
@@ -350,6 +354,7 @@ export class AgentOrchestrator {
  * 把 AgentMessage 转为 OpenAI API 消息格式
  *  - assistant 含 tool_calls 时按 OpenAI function calling 协议序列化
  *  - tool 角色必须带 tool_call_id
+ *  - user 角色含 attachments 时拼接附件内容
  */
 function historyToApi(m: AgentMessage): {
   role: 'system' | 'user' | 'assistant' | 'tool'
@@ -377,7 +382,41 @@ function historyToApi(m: AgentMessage): {
       name: m.tool_name,
     }
   }
+
+  // user 角色：如果有附件，拼接附件内容到 content
+  if (m.role === 'user' && m.attachments && m.attachments.length > 0) {
+    const content = buildContentWithAttachments(m.content, m.attachments)
+    return { role: m.role, content }
+  }
+
   return { role: m.role, content: m.content }
+}
+
+/**
+ * 把附件内容拼接到用户提问前面，形成给 LLM 的完整 prompt
+ */
+function buildContentWithAttachments(text: string, attachments: AIChatAttachment[]): string {
+  const blocks = attachments.map((a, i) => {
+    const meta = `${a.fileName} · ${formatFileSize(a.sizeBytes)}${a.truncated ? ` · 已截取前 ${a.content.length} 字（原文 ${a.charCount} 字）` : ''}`
+    // 用 Markdown 代码块包裹文件内容，最大限度保留原始格式
+    return `### 📎 附件 ${i + 1}：${meta}
+\`\`\`
+${a.content}
+\`\`\``
+  }).join('\n\n')
+
+  const question = text.trim() || '请基于以上附件内容给出回答。'
+  return `我提供了 ${attachments.length} 个附件作为上下文，请阅读后回答我的问题。
+
+${blocks}
+
+**我的问题**：${question}`
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
 
 function genMsgId(prefix: string): string {

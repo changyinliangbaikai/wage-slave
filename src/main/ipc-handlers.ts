@@ -8,6 +8,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import log from 'electron-log/main'
 import { IPC } from '@shared/ipc-channels'
+import type { AIChatAttachment } from '@shared/types'
 import {
   getConfig, setConfig,
   getLog, saveLog,
@@ -48,6 +49,7 @@ import {
 } from './agent/cron/scheduler'
 import { migrateScheduledTasksToAgentCrons } from './agent/cron/migration'
 import { AGENT_TOOL_GROUPS } from './agent/tool-registry'
+import { registerAttachmentIPC } from './ipc-handlers-attachment'
 import { getAllowedPaths, getDefaultAllowedPaths, DANGEROUS_RULES } from './agent/security'
 import {
   listSessions as listChatSessions,
@@ -499,12 +501,15 @@ function registerAgentIPC(): void {
   ipcMain.on(IPC.AGENT_OPEN_WINDOW, () => openAgentChatWindow())
 
   // 启动一次 Agent 任务
-  ipcMain.handle(IPC.AGENT_START, async (_e, params: { sessionId?: string; userInput: string }) => {
-    const { sessionId: providedId, userInput } = params
+  ipcMain.handle(IPC.AGENT_START, async (_e, params: { sessionId?: string; userInput: string; attachments?: AIChatAttachment[] }) => {
+    const { sessionId: providedId, userInput, attachments } = params
     const sessionId = providedId ?? genAgentSessionId()
 
-    if (!userInput || !userInput.trim()) {
-      return { ok: false, error: '输入不能为空' }
+    // 允许「只发送附件不打字」的场景
+    const hasInput = userInput && userInput.trim()
+    const hasAttachments = attachments && attachments.length > 0
+    if (!hasInput && !hasAttachments) {
+      return { ok: false, error: '输入不能为空，请提供文字描述或文件附件' }
     }
 
     // 如果同会话已有活跃 Agent，先中止
@@ -528,9 +533,10 @@ function registerAgentIPC(): void {
     agentActivityStarted('chat')
     // fire-and-forget 异步执行；事件通过回调推给 UI
     agent.run({
-      userInput,
+      userInput: userInput ?? '',
       apiKey,
       history,
+      attachments,
       callbacks: {
         onChunk: (p) => broadcast(IPC.AGENT_CHUNK, p),
         onDone: (p) => {
@@ -747,4 +753,7 @@ function registerAgentCronIPC(): void {
       return { ok: false, error: e instanceof Error ? e.message : String(e) }
     }
   })
+
+  // 注册文件附件 IPC 处理器
+  registerAttachmentIPC()
 }

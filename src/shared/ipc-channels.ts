@@ -80,6 +80,10 @@ export const IPC = {
   AI_CHAT_PICK_ATTACHMENTS: 'renderer:ai-chat-pick-attachments', // 选择附件（多选）：打开对话框 + 读取
   AI_CHAT_READ_ATTACHMENTS: 'renderer:ai-chat-read-attachments', // 按路径读取附件（用于拖拽）
 
+  // ── 文件附件系统（快速对话 + Agent 模式通用）──────
+  ATTACHMENT_PICK:        'renderer:attachment-pick',        // 打开文件选择器读取附件
+  ATTACHMENT_READ:        'renderer:attachment-read',        // 从路径读取附件（拖拽用）
+
   // 窗口行为
   WINDOW_DRAG:         'renderer:window-drag',     // 拖动窗口（发送鼠标偏移）
   WINDOW_HIDE_EDGE:    'renderer:window-hide-edge',

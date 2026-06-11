@@ -167,6 +167,24 @@
   line-height: 1.55;
 }
 
+/* 用户消息中的附件列表 */
+.agent-msg__attachments {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.agent-msg__attachment {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.9;
+}
+
 .agent-msg--assistant .agent-msg__avatar {
   flex-shrink: 0;
   width: 32px;
@@ -397,6 +415,13 @@
   justify-content: space-between;
   align-items: center;
 }
+
+.agent-input__left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .agent-input__hint { color: var(--agent-text-dim); font-size: 11px; }
 
 .agent-input__btn {
@@ -408,6 +433,16 @@
   font-weight: 500;
   transition: opacity 0.15s;
 }
+
+.agent-input__btn--attach {
+  background: var(--agent-panel);
+  color: var(--agent-text);
+  border: 1px solid var(--agent-border);
+  padding: 4px 12px;
+  font-size: 12px;
+}
+.agent-input__btn--attach:hover { background: var(--agent-border); }
+.agent-input__btn--attach:disabled { opacity: 0.5; cursor: not-allowed; }
 .agent-input__btn--send {
   background: var(--agent-primary);
   color: #fff;
