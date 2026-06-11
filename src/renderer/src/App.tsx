@@ -503,7 +503,7 @@ export default function App() {
   ]
 
   return (
-    <div className="app-container">
+    <>
       {/* 右键菜单 */}
       {ctxMenu.visible && (
         <ContextMenu
@@ -513,6 +513,8 @@ export default function App() {
           onClose={() => setCtxMenu(v => ({ ...v, visible: false }))}
         />
       )}
+
+      <div className="app-container">
 
       {/* 气泡层 */}
       <div className="bubble-layer">
@@ -620,5 +622,6 @@ export default function App() {
         />
       </div>
     </div>
+    </>
   )
 }

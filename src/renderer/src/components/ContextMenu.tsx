@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import './ContextMenu.css'
 
 export interface MenuItem {
@@ -54,20 +54,49 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
     }
   }, [handleMouseDownOutside, handleKeyDown, onClose])
 
-  // 动态估算菜单的宽高度进行视口内限位，实现完全同步定位，防止 DOM 尚未渲染完成时零宽高引起的错位
-  const itemCount = items.filter(item => !item.divider).length
-  const dividerCount = items.filter(item => item.divider).length
-  const estimatedHeight = itemCount * 31 + dividerCount * 10 + 8
-  const estimatedWidth = 180
+  // ── 使用 useLayoutEffect 测量实际尺寸，精确定位 ──
+  // 在浏览器绘制前同步执行：先隐藏菜单 → 测量真实宽高 → 计算位置 → 显示
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
 
-  const adjustedX = Math.max(0, Math.min(x, window.innerWidth - estimatedWidth - 4))
-  const adjustedY = Math.max(0, Math.min(y, window.innerHeight - estimatedHeight - 4))
+    // 1. 先放到鼠标位置、隐藏（用于浏览器计算真实布局尺寸）
+    el.style.visibility = 'hidden'
+    el.style.left = `${x}px`
+    el.style.top = `${y}px`
+
+    // 2. 强制布局并测量菜单实际宽高
+    const menuW = el.offsetWidth
+    const menuH = el.offsetHeight
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+
+    // 3. 计算最终位置
+    // X 轴：默认菜单左边缘在光标位置，如果超出右侧则左移
+    let left = x
+    if (left + menuW > vw) {
+      left = Math.max(0, vw - menuW - 4)
+    }
+
+    // Y 轴：默认菜单顶部在光标位置
+    // 如果菜单放不下（超出窗口底部），向上推，并确保光标在菜单下方
+    let top = y
+    if (top + menuH > vh) {
+      // 把菜单底部贴近光标上方（留 6px 间距），确保光标不落在菜单上
+      top = Math.max(0, y - menuH - 6)
+    }
+
+    // 4. 应用最终位置并显示
+    el.style.left = `${left}px`
+    el.style.top = `${top}px`
+    el.style.visibility = 'visible'
+  }, [x, y, items])
 
   return (
     <div
       ref={ref}
       className="context-menu"
-      style={{ left: adjustedX, top: adjustedY }}
+      style={{ left: x, top: y, visibility: 'hidden' }}
       onContextMenu={e => e.preventDefault()}
     >
       {items.map((item, i) =>

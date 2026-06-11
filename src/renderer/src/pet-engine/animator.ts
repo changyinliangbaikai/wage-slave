@@ -102,12 +102,20 @@ export class PetAnimator {
   }
 
   private tick = (timestamp: number): void => {
-    const dt = timestamp - this.lastTimestamp
+    let dt = timestamp - this.lastTimestamp
     this.lastTimestamp = timestamp
 
     const anim = this.pack.animations[this.state]
     const total = getFrameCount(anim)
     const frameDuration = 1000 / anim.fps
+
+    // 防止屏保/休眠恢复后 dt 过大导致帧疯狂快进：
+    // 系统休眠时 rAF 暂停，恢复后首次回调的 dt 可能是数十秒甚至数分钟，
+    // 如果直接累加到 frameTimer 会导致动画高速播放。
+    // 将 dt 限制在 2 倍帧间隔内，确保每次 tick 最多前进 1 帧。
+    if (dt > frameDuration * 2) {
+      dt = frameDuration * 2
+    }
 
     this.frameTimer += dt
     if (this.frameTimer >= frameDuration) {
