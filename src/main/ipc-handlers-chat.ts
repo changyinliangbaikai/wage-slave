@@ -18,27 +18,7 @@ import { DialogueService } from './chat/dialogue-service'
 import * as chatStore from './chat/chat-store'
 import { getChatWindow, openChatWindow } from './windows'
 import { agentActivityStarted, agentActivityEnded } from './agent/active-tracker'
-
-// keytar 可能在部分环境缺失（与既有逻辑一致，降级为空 key）
-let keytar: typeof import('keytar') | null = null
-try {
-  keytar = require('keytar')
-} catch {
-  keytar = null
-}
-const KEYTAR_SERVICE = 'xiao-niu-ma'
-const KEYTAR_ACCOUNT = 'api-key'
-
-async function getApiKey(): Promise<string> {
-  if (!keytar) return ''
-  try {
-    return (await keytar.getPassword(KEYTAR_SERVICE, KEYTAR_ACCOUNT)) ?? ''
-  } catch (e) {
-    // 无可用密钥后端（如缺少 libsecret/D-Bus）时降级为空，交由下游提示「未配置 API Key」
-    log.warn('[ChatIPC] 读取 API Key 失败，降级为空:', e)
-    return ''
-  }
-}
+import { getStoredApiKey } from './api-key'
 
 /**
  * 注册统一对话 IPC
@@ -69,7 +49,7 @@ export function registerChatIPC(): void {
     const existing = active.get(sessionId)
     if (existing) existing.abort()
 
-    const apiKey = await getApiKey()
+    const apiKey = await getStoredApiKey()
     const service = new DialogueService()
     active.set(sessionId, service)
 

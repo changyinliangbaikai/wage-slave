@@ -13,6 +13,9 @@ import * as fs from 'fs'
 import * as path from 'path'
 import * as readline from 'readline'
 import type { AIChatAttachment, AttachmentReadResult } from '@shared/types'
+import mammoth from 'mammoth'
+import * as XLSX from 'xlsx'
+const pdfParse = require('pdf-parse')
 
 // ═══════════════════════════════════════════════
 // 配置常量
@@ -131,6 +134,71 @@ async function extractTextFile(filePath: string, maxChars: number): Promise<{ co
   fileStream.destroy()
 
   return { content: content.trimEnd(), charCount, truncated }
+}
+
+/**
+ * 提取 Word 文档（.docx, .doc）内容
+ */
+async function extractDocxFile(filePath: string, maxChars: number): Promise<{ content: string; charCount: number; truncated: boolean }> {
+  try {
+    const result = await mammoth.extractRawText({ path: filePath })
+    let text = result.value || ''
+    const charCount = text.length
+    let truncated = false
+    if (text.length > maxChars) {
+      text = text.slice(0, maxChars - 25) + '\n[内容已截断...]'
+      truncated = true
+    }
+    return { content: text.trimEnd(), charCount, truncated }
+  } catch (err) {
+    throw new Error(`Word文档解析失败: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/**
+ * 提取 PDF 文件内容
+ */
+async function extractPdfFile(filePath: string, maxChars: number): Promise<{ content: string; charCount: number; truncated: boolean }> {
+  try {
+    const dataBuffer = fs.readFileSync(filePath)
+    const data = await pdfParse(dataBuffer)
+    let text = data.text || ''
+    const charCount = text.length
+    let truncated = false
+    if (text.length > maxChars) {
+      text = text.slice(0, maxChars - 25) + '\n[内容已截断...]'
+      truncated = true
+    }
+    return { content: text.trimEnd(), charCount, truncated }
+  } catch (err) {
+    throw new Error(`PDF文件解析失败: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/**
+ * 提取 Excel 工作表内容（转换为 CSV 格式）
+ */
+async function extractExcelFile(filePath: string, maxChars: number): Promise<{ content: string; charCount: number; truncated: boolean }> {
+  try {
+    const workbook = XLSX.readFile(filePath)
+    let text = ''
+    for (const sheetName of workbook.SheetNames) {
+      const worksheet = workbook.Sheets[sheetName]
+      const csv = XLSX.utils.sheet_to_csv(worksheet)
+      if (csv.trim()) {
+        text += `[工作表: ${sheetName}]\n${csv}\n`
+      }
+    }
+    const charCount = text.length
+    let truncated = false
+    if (text.length > maxChars) {
+      text = text.slice(0, maxChars - 25) + '\n[内容已截断...]'
+      truncated = true
+    }
+    return { content: text.trimEnd(), charCount, truncated }
+  } catch (err) {
+    throw new Error(`Excel文件解析失败: ${err instanceof Error ? err.message : String(err)}`)
+  }
 }
 
 // ═══════════════════════════════════════════════
@@ -280,21 +348,61 @@ export class FileAttachmentService {
       }
     }
 
-    // 提取文本内容
-    const { content, charCount, truncated } = await extractTextFile(filePath, CONFIG.MAX_CONTENT_CHARS)
+    // 差异化提取文本内容，避免二进制文件解析乱码
+    let content = ''
+    let charCount = 0
+    let truncated = false
 
-    return {
-      id: this.generateId(),
-      fileName,
-      fileType,
-      mimeType,
-      sizeBytes,
-      content,
-      charCount,
-      truncated,
-      truncatedAt: truncated ? CONFIG.MAX_CONTENT_CHARS : undefined,
-      status: 'success',
-      createdAt: Date.now(),
+    try {
+      if (ext === '.docx' || ext === '.doc') {
+        const result = await extractDocxFile(filePath, CONFIG.MAX_CONTENT_CHARS)
+        content = result.content
+        charCount = result.charCount
+        truncated = result.truncated
+      } else if (ext === '.pdf') {
+        const result = await extractPdfFile(filePath, CONFIG.MAX_CONTENT_CHARS)
+        content = result.content
+        charCount = result.charCount
+        truncated = result.truncated
+      } else if (ext === '.xlsx' || ext === '.xls') {
+        const result = await extractExcelFile(filePath, CONFIG.MAX_CONTENT_CHARS)
+        content = result.content
+        charCount = result.charCount
+        truncated = result.truncated
+      } else {
+        const result = await extractTextFile(filePath, CONFIG.MAX_CONTENT_CHARS)
+        content = result.content
+        charCount = result.charCount
+        truncated = result.truncated
+      }
+
+      return {
+        id: this.generateId(),
+        fileName,
+        fileType,
+        mimeType,
+        sizeBytes,
+        content,
+        charCount,
+        truncated,
+        truncatedAt: truncated ? CONFIG.MAX_CONTENT_CHARS : undefined,
+        status: 'success',
+        createdAt: Date.now(),
+      }
+    } catch (err) {
+      return {
+        id: this.generateId(),
+        fileName,
+        fileType,
+        mimeType,
+        sizeBytes,
+        content: `[提取文件内容失败: ${err instanceof Error ? err.message : String(err)}]`,
+        charCount: 0,
+        truncated: false,
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err),
+        createdAt: Date.now(),
+      }
     }
   }
 
