@@ -1,5 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
-import type { CSSProperties } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import './ContextMenu.css'
 
 export interface MenuItem {
@@ -55,32 +54,20 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
     }
   }, [handleMouseDownOutside, handleKeyDown, onClose])
 
-  const [style, setStyle] = useState<CSSProperties>({
-    visibility: 'hidden',
-    left: x,
-    top: y,
-  })
+  // 动态估算菜单的宽高度进行视口内限位，实现完全同步定位，防止 DOM 尚未渲染完成时零宽高引起的错位
+  const itemCount = items.filter(item => !item.divider).length
+  const dividerCount = items.filter(item => item.divider).length
+  const estimatedHeight = itemCount * 31 + dividerCount * 10 + 8
+  const estimatedWidth = 180
 
-  useEffect(() => {
-    if (ref.current) {
-      const rect = ref.current.getBoundingClientRect()
-      const w = rect.width
-      const h = rect.height
-      const ax = Math.max(0, Math.min(x, window.innerWidth - w - 4))
-      const ay = Math.max(0, Math.min(y, window.innerHeight - h - 4))
-      setStyle({
-        left: ax,
-        top: ay,
-        visibility: 'visible',
-      })
-    }
-  }, [x, y, items.length])
+  const adjustedX = Math.max(0, Math.min(x, window.innerWidth - estimatedWidth - 4))
+  const adjustedY = Math.max(0, Math.min(y, window.innerHeight - estimatedHeight - 4))
 
   return (
     <div
       ref={ref}
       className="context-menu"
-      style={style}
+      style={{ left: adjustedX, top: adjustedY }}
       onContextMenu={e => e.preventDefault()}
     >
       {items.map((item, i) =>
