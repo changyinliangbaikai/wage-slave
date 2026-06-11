@@ -7,6 +7,7 @@
   border-radius: 0;
   padding: 4px 0;
   min-width: 160px;
+  width: max-content;
   box-shadow:
     inset -2px -2px 0 #d4b87a,
     inset 2px 2px 0 #fffde0,
@@ -44,6 +45,7 @@
 
 .menu-label {
   flex: 1;
+  white-space: nowrap;
 }
 
 .menu-divider {
@@ -51,3 +53,4 @@
   background: #d4b87a;
   margin: 4px 8px;
 }
+

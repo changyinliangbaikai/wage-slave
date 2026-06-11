@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
+import type { CSSProperties } from 'react'
 import './ContextMenu.css'
 
 export interface MenuItem {
@@ -54,15 +55,32 @@ export default function ContextMenu({ x, y, items, onClose }: Props) {
     }
   }, [handleMouseDownOutside, handleKeyDown, onClose])
 
-  // Adjust position to keep menu in viewport
-  const adjustedX = Math.min(x, window.innerWidth - 160)
-  const adjustedY = Math.min(y, window.innerHeight - items.length * 36 - 20)
+  const [style, setStyle] = useState<CSSProperties>({
+    visibility: 'hidden',
+    left: x,
+    top: y,
+  })
+
+  useEffect(() => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect()
+      const w = rect.width
+      const h = rect.height
+      const ax = Math.max(0, Math.min(x, window.innerWidth - w - 4))
+      const ay = Math.max(0, Math.min(y, window.innerHeight - h - 4))
+      setStyle({
+        left: ax,
+        top: ay,
+        visibility: 'visible',
+      })
+    }
+  }, [x, y, items.length])
 
   return (
     <div
       ref={ref}
       className="context-menu"
-      style={{ left: adjustedX, top: adjustedY }}
+      style={style}
       onContextMenu={e => e.preventDefault()}
     >
       {items.map((item, i) =>
