@@ -27,6 +27,8 @@ import type { ChatMode, ChatSessionMeta } from '@shared/types-chat'
 import { openSkills, openAgentCron } from '../hooks/useIPC'
 import { ToolCallCard } from './agent/ToolCallCard'
 import { AgentInput } from './agent/AgentInput'
+import { useFileAttachments } from '../hooks/useFileAttachments'
+import { AttachmentList } from '../components/AttachmentList'
 // 复用 Agent 样式中的工具卡片 / 输入框 / 配色变量（.agent-tool-card / .agent-input / --agent-*）
 import './AgentChat.css'
 import './Chat.css'
@@ -50,6 +52,17 @@ export default function Chat() {
   const [showSessions, setShowSessions] = useState(false)
   const [sessions, setSessions] = useState<ChatSessionMeta[]>([])
   const listRef = useRef<HTMLDivElement>(null)
+  const [dragOver, setDragOver] = useState(false)
+
+  // 使用统一的文件附件 Hook
+  const {
+    attachments,
+    isReading,
+    pickFiles,
+    addFilesFromDrop,
+    removeAttachment,
+    clearAttachments,
+  } = useFileAttachments()
 
   // 自动滚到底部
   useEffect(() => {
@@ -64,13 +77,15 @@ export default function Chat() {
 
   const handleSubmit = async () => {
     const text = input.trim()
-    if (!text) return
+    if (!text && attachments.length === 0) return
     setInput('')
-    await sendMessage(text)
+    await sendMessage(text, attachments)
+    clearAttachments() // 发送后清空附件
   }
 
   const handlePick = async (id: string) => {
     setShowSessions(false)
+    clearAttachments() // 切换会话时清空附件
     await loadSession(id)
   }
 
@@ -81,12 +96,43 @@ export default function Chat() {
   }
 
   return (
-    <div className="chat" data-mode={mode}>
+    <div
+      className={`chat ${dragOver ? 'drag-over' : ''}`}
+      data-mode={mode}
+      onDragOver={(e) => {
+        e.preventDefault()
+        if (!dragOver) setDragOver(true)
+      }}
+      onDragLeave={(e) => {
+        e.preventDefault()
+        if (e.target === e.currentTarget) setDragOver(false)
+      }}
+      onDrop={async (e) => {
+        e.preventDefault()
+        setDragOver(false)
+        await addFilesFromDrop(e.dataTransfer.files)
+      }}
+    >
       <header className="chat__header">
-        <ModeSwitch mode={mode} disabled={running} onChange={switchMode} />
+        <ModeSwitch
+          mode={mode}
+          disabled={running}
+          onChange={(m) => {
+            switchMode(m)
+            clearAttachments() // 切换模式时清空附件
+          }}
+        />
         <div className="chat__session-id" title={sessionId}>#{sessionId.slice(-6)}</div>
         <div className="chat__actions">
-          <button type="button" className="chat__btn" onClick={() => newSession()} disabled={running}>
+          <button
+            type="button"
+            className="chat__btn"
+            onClick={() => {
+              newSession()
+              clearAttachments() // 新建会话时清空附件
+            }}
+            disabled={running}
+          >
             ＋ 新会话
           </button>
           <button type="button" className="chat__btn" onClick={() => setShowSessions(true)}>
@@ -121,12 +167,19 @@ export default function Chat() {
       </main>
 
       <footer className="chat__footer">
+        {/* 附件列表 */}
+        <AttachmentList
+          attachments={attachments}
+          onRemove={removeAttachment}
+        />
         <AgentInput
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
           onStop={stopGeneration}
           running={running}
+          onPickFiles={pickFiles}
+          isReadingFiles={isReading}
           placeholder={mode === 'agent'
             ? '描述你想完成的任务，例如：帮我整理今天的待办并写入日志'
             : '问点什么吧，例如：帮我把这段话润色一下'}
@@ -141,6 +194,16 @@ export default function Chat() {
           onPick={handlePick}
           onDelete={handleDelete}
         />
+      )}
+
+      {/* 拖拽蒙层 */}
+      {dragOver && (
+        <div className="chat-drag-overlay">
+          <div className="chat-drag-hint">
+            📎 松开以添加为附件<br />
+            <small>支持 txt / md / docx / doc</small>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -219,7 +282,19 @@ function MessageItem({ message }: { message: UIChatMessage }) {
   if (message.role === 'user') {
     return (
       <div className="chat-msg chat-msg--user">
-        <div className="chat-msg__bubble">{message.content}</div>
+        <div className="chat-msg__bubble">
+          {message.content}
+          {/* 显示附件列表 */}
+          {message.attachments && message.attachments.length > 0 && (
+            <div className="chat-msg__attachments">
+              {message.attachments.map(att => (
+                <span key={att.id} className="chat-msg__attachment" title={att.fileName}>
+                  📎 {att.fileName} {att.truncated && '(已截取)'}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     )
   }

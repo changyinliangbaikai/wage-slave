@@ -11,7 +11,7 @@
 // 两者的「超集」：同时携带简单对话的 stats 与 Agent 的 tool_calls / tool 字段。
 // ─────────────────────────────────────────────
 
-import type { AIChatStats } from './types'
+import type { AIChatStats, AIChatAttachment } from './types'
 
 /** 对话模式：简单对话 / Agent 工具模式 */
 export type ChatMode = 'chat' | 'agent'
@@ -50,6 +50,8 @@ export interface ChatMessage {
   tool_name?: string
   /** assistant 的 token 统计（简单对话模式） */
   stats?: AIChatStats
+  /** 附件列表 */
+  attachments?: AIChatAttachment[]
   /** 附加元信息 */
   metadata?: {
     model?: string
@@ -121,10 +123,12 @@ export interface ChatStartParams {
   sessionId: string
   mode: ChatMode
   userInput: string
+  /** 附件列表 */
+  attachments?: AIChatAttachment[]
   /** 简单对话模式：本轮 assistant 占位消息 id，用于流式定位 */
   assistantMessageId?: string
-  /** 简单对话模式：之前的历史（{role, content}），main 据此拼装请求 */
-  history?: Array<Pick<ChatMessage, 'role' | 'content'>>
+  /** 简单对话模式：之前的历史（包含 role、content、attachments） */
+  history?: Array<Pick<ChatMessage, 'role' | 'content' | 'attachments'>>
   /** 简单对话模式：预置角色注入的 system prompt */
   systemPrompt?: string
   /** Agent 模式：覆盖最大迭代轮次 */

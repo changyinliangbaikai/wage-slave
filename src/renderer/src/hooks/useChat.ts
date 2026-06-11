@@ -23,6 +23,7 @@ import type {
   ChatStartParams,
   ChatStartResult,
 } from '@shared/types-chat'
+import type { AIChatAttachment } from '@shared/types'
 
 const DESKTOP_API_UNAVAILABLE = '当前页面未连接桌面端能力，请在小小牛马桌面应用窗口中使用对话。'
 
@@ -79,7 +80,7 @@ export interface UseChatResult {
   running: boolean
   fatalError: string | null
   currentTool: string | null
-  sendMessage: (content: string) => Promise<void>
+  sendMessage: (content: string, attachments?: AIChatAttachment[]) => Promise<void>
   stopGeneration: () => Promise<void>
   newSession: (mode?: ChatMode) => void
   loadSession: (id: string) => Promise<void>
@@ -185,15 +186,15 @@ export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
   }, [])
 
   // ── 发送消息 ──────────────────────────────────
-  const sendMessage = useCallback(async (content: string) => {
+  const sendMessage = useCallback(async (content: string, attachments?: AIChatAttachment[]) => {
     const trimmed = content.trim()
-    if (!trimmed || running) return
+    if ((!trimmed && (!attachments || attachments.length === 0)) || running) return
 
     const id = sessionIdRef.current
     const curMode = modeRef.current
 
     const userMsg: UIChatMessage = {
-      id: genId('user'), role: 'user', content: trimmed, createdAt: Date.now(),
+      id: genId('user'), role: 'user', content: trimmed, attachments, createdAt: Date.now(),
     }
     const assistantId = genId('asst')
 
@@ -211,17 +212,18 @@ export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
       setMessages(prev => [...prev, userMsg])
     }
 
-    // chat 模式需要把历史一并带给主进程（仅 role/content）
+    // chat 模式需要把历史一并带给主进程（仅 role/content/attachments）
     const history = curMode === 'chat'
       ? messagesRef.current
           .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content))
-          .map(m => ({ role: m.role, content: m.content }))
+          .map(m => ({ role: m.role, content: m.content, attachments: m.attachments }))
       : undefined
 
     const params: ChatStartParams = {
       sessionId: id,
       mode: curMode,
       userInput: trimmed,
+      attachments,
       assistantMessageId: curMode === 'chat' ? assistantId : undefined,
       history,
     }

@@ -10,7 +10,7 @@
  */
 
 import log from 'electron-log/main'
-import type { AgentMessage } from '@shared/types'
+import type { AgentMessage, AIChatAttachment } from '@shared/types'
 import type {
   ChatStartParams,
   ChatChunkPayload,
@@ -29,6 +29,19 @@ export interface DialogueCallbacks {
   onError: (payload: ChatErrorPayload) => void
   /** 仅 Agent 模式：工具调用状态推送 */
   onToolEvent: (payload: ChatToolEventPayload) => void
+}
+
+function buildContentWithAttachments(text: string, attachments: AIChatAttachment[]): string {
+  const blocks = attachments.map((a, i) => {
+    return `[附件 #${i + 1} - ${a.fileName} (${a.fileType})]\n${a.content}\n[附件 #${i + 1} 结束]\n`
+  })
+  return `我提供了 ${attachments.length} 个附件作为上下文，请阅读后回答我的问题。
+用户输入：
+${text}
+
+---
+附件上下文：
+${blocks.join('\n')}`
 }
 
 export class DialogueService {
@@ -68,9 +81,15 @@ export class DialogueService {
     }
     for (const m of params.history ?? []) {
       if (m.role === 'tool' || m.role === 'system') continue
-      messages.push({ role: m.role, content: m.content })
+      const content = m.attachments && m.attachments.length > 0
+        ? buildContentWithAttachments(m.content, m.attachments)
+        : m.content
+      messages.push({ role: m.role, content })
     }
-    messages.push({ role: 'user', content: params.userInput })
+    const userInput = params.attachments && params.attachments.length > 0
+      ? buildContentWithAttachments(params.userInput, params.attachments)
+      : params.userInput
+    messages.push({ role: 'user', content: userInput })
 
     await startSimpleChat({ requestId, messages }, apiKey, {
       onChunk: (p) =>
@@ -103,6 +122,7 @@ export class DialogueService {
 
     await orchestrator.run({
       userInput: params.userInput,
+      attachments: params.attachments,
       apiKey,
       history,
       maxIterations: params.maxIterations,

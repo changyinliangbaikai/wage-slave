@@ -337,3 +337,53 @@
   font-size: 14px;
 }
 .chat-drawer__item-delete:hover { background: rgba(192, 57, 43, 0.12); color: var(--agent-error); }
+
+/* ── 拖拽蒙层 ── */
+.chat-drag-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(139, 94, 60, 0.15);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 100;
+}
+.chat-drag-hint {
+  padding: 24px 40px;
+  background: #fffef7;
+  border: 2px dashed #8b5e3c;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #8b5e3c;
+  text-align: center;
+  line-height: 1.6;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+}
+.chat-drag-hint small {
+  font-size: 12px;
+  font-weight: 400;
+  color: #9a8f70;
+}
+.chat.drag-over {
+  box-shadow: inset 0 0 0 2px #8b5e3c;
+}
+
+/* ── 用户消息中的附件列表 ── */
+.chat-msg__attachments {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.chat-msg__attachment {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0.9;
+}
