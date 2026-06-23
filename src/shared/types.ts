@@ -91,6 +91,7 @@ export interface AgentSecurityPolicy {
 /** AI 对话附件（txt / md / docx / doc 等读取后的文本 + 元数据） */
 export interface AIChatAttachment {
   id: string
+  path?: string          // 真实文件路径
   fileName: string
   fileType: string       // 'txt' | 'md' | 'docx' | 'pdf' | 'js' | 'py' 等
   mimeType: string       // MIME 类型

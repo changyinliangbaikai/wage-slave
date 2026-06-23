@@ -115,47 +115,55 @@ export class AgentOrchestrator {
       contextStrategyVersion: 'default'
     })
 
+    const files = opts.attachments
+      ? opts.attachments.map(att => ({ path: att.path || '' }))
+      : []
+
     collector.record('turn.start', {
       index: 1,
       userMessage: opts.userInput,
-      files: []
+      files
     })
 
     this.running = true
     this.abortController = new AbortController()
-    this.history = [...opts.history]
-    this.stats = { iterations: 0, toolCalls: 0, totalDurationMs: 0 }
+
     const overallStart = Date.now()
     const maxIterations = getMaxIterations(opts.maxIterations)
     const timeoutMs = normalizeTimeoutMs(opts.timeoutMs)
     let timedOut = false
-    const timeoutTimer = timeoutMs
-      ? setTimeout(() => {
-          timedOut = true
-          this.abortController?.abort()
-        }, timeoutMs)
-      : null
-
-    // ── 把用户输入加入 history ──
-    const userMsg: AgentMessage = {
-      id: genMsgId('user'),
-      role: 'user',
-      content: opts.userInput,
-      attachments: opts.attachments,
-      createdAt: Date.now(),
-    }
-    this.history.push(userMsg)
-
-    // ── 技能匹配：基于用户输入命中一个已启用 skill，整轮注入其引导 ──
-    const matched = matchSkill(opts.userInput)
-    const skillAddition = matched ? buildSkillPromptAddition(matched.skill) : undefined
-    if (matched) {
-      log.info(`[Agent] sessionId=${this.sessionId} 激活技能: ${matched.skill.name}`)
-    }
-
+    let executionStatus: 'success' | 'failed' = 'failed'
     let finalContent = ''
+    let timeoutTimer: any = null
 
     try {
+      timeoutTimer = timeoutMs
+        ? setTimeout(() => {
+            timedOut = true
+            this.abortController?.abort()
+          }, timeoutMs)
+        : null
+
+      this.history = [...opts.history]
+      this.stats = { iterations: 0, toolCalls: 0, totalDurationMs: 0 }
+
+      // ── 把用户输入加入 history ──
+      const userMsg: AgentMessage = {
+        id: genMsgId('user'),
+        role: 'user',
+        content: opts.userInput,
+        attachments: opts.attachments,
+        createdAt: Date.now(),
+      }
+      this.history.push(userMsg)
+
+      // ── 技能匹配：基于用户输入命中一个已启用 skill，整轮注入其引导 ──
+      const matched = matchSkill(opts.userInput)
+      const skillAddition = matched ? buildSkillPromptAddition(matched.skill) : undefined
+      if (matched) {
+        log.info(`[Agent] sessionId=${this.sessionId} 激活技能: ${matched.skill.name}`)
+      }
+
       while (this.stats.iterations < maxIterations) {
         if (this.abortController.signal.aborted) break
 
@@ -181,6 +189,7 @@ export class AgentOrchestrator {
         }, { spanId: contextSpanId })
 
         // ── 调用 LLM（流式） ──
+        const llmStart = Date.now()
         const result = await streamLLMWithTools({
           messages: apiMessages,
           tools,
@@ -195,6 +204,7 @@ export class AgentOrchestrator {
             })
           },
         })
+        const latencyMs = Date.now() - llmStart
 
         if (result.aborted) break
 
@@ -223,7 +233,7 @@ export class AgentOrchestrator {
           promptTokens: 0,
           completionTokens: 0,
           totalTokens: 0,
-          latencyMs: 0,
+          latencyMs,
           output: {
             type: result.toolCalls.length ? 'tool_call' : 'text',
             content: result.content,
@@ -316,9 +326,13 @@ export class AgentOrchestrator {
         aborted: wasAborted,
         abortReason: wasAborted ? (timedOut ? 'timeout' : 'user') : undefined,
       })
+
+      if (!wasAborted) {
+        executionStatus = 'success'
+      }
     } catch (e: unknown) {
       // 用户主动中断：当作"已完成"处理（保留已经产生的部分）
-      if (isAbortError(e) || this.abortController.signal.aborted) {
+      if (isAbortError(e) || (this.abortController && this.abortController.signal.aborted)) {
         this.stats.totalDurationMs = Date.now() - overallStart
         this.persistSession(finalContent || '(用户中断)')
         opts.callbacks.onDone({
@@ -344,11 +358,11 @@ export class AgentOrchestrator {
       this.abortController = null
 
       collector.record('turn.end', {
-        status: timedOut ? 'failed' : 'success',
+        status: executionStatus,
         assistantMessage: finalContent
       })
       collector.record('run.end', {
-        status: timedOut ? 'failed' : 'success',
+        status: executionStatus,
         latencyMs: Date.now() - overallStart
       })
 

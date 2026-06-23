@@ -335,6 +335,7 @@ export class FileAttachmentService {
       // 不支持的类型，返回元数据但标记错误
       return {
         id: this.generateId(),
+        path: filePath,
         fileName,
         fileType,
         mimeType,
@@ -378,6 +379,7 @@ export class FileAttachmentService {
 
       return {
         id: this.generateId(),
+        path: filePath,
         fileName,
         fileType,
         mimeType,
@@ -392,6 +394,7 @@ export class FileAttachmentService {
     } catch (err) {
       return {
         id: this.generateId(),
+        path: filePath,
         fileName,
         fileType,
         mimeType,
