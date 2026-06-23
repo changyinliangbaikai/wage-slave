@@ -38,7 +38,7 @@ export class MemoryTraceCollector {
       projectId: 'xiao-niu-ma-integration',
       sessionId: this.sessionId,
       runId: this.runId,
-      payload: { ...payload },
+      payload: structuredClone(payload),
     }
 
     if (extra?.spanId !== undefined) {
