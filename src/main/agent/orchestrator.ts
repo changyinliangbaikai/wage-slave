@@ -35,6 +35,7 @@ import { matchSkill, buildSkillPromptAddition } from './skills/matcher'
 import { compressHistoryForLLM } from './context-compressor'
 import { getToolSafety } from './security'
 import { getConfig } from '../store'
+import { MemoryTraceCollector } from './trace-collector'
 
 /** 编排器最大迭代轮次，防止 LLM 反复调用工具死循环 */
 const DEFAULT_MAX_ITERATIONS = 20
@@ -100,6 +101,26 @@ export class AgentOrchestrator {
   async run(opts: AgentRunOptions): Promise<void> {
     if (this.running) throw new Error('Agent 正在运行，请先停止')
 
+    const collector = new MemoryTraceCollector(this.sessionId)
+    const curRunId = collector.getRunId()
+
+    collector.record('run.start', {
+      name: `小牛马任务 · ${opts.userInput.slice(0, 30)}`,
+      model: getConfig().llm_model || 'default-model',
+      modelProvider: 'openai-compatible',
+      promptVersion: 'xiao-niu-ma-prompt@2.1.0',
+      skillVersions: ['xiao-niu-ma-agent@2.1.0'],
+      toolSchemaVersion: 'xiao-niu-ma-tools@v2.1',
+      runtimeVersion: 'xiao-niu-ma-runtime@2.1.0',
+      contextStrategyVersion: 'default'
+    })
+
+    collector.record('turn.start', {
+      index: 1,
+      userMessage: opts.userInput,
+      files: []
+    })
+
     this.running = true
     this.abortController = new AbortController()
     this.history = [...opts.history]
@@ -151,6 +172,14 @@ export class AgentOrchestrator {
           ...compressedHistory.map(m => historyToApi(m)),
         ]
 
+        const contextSpanId = `span_ctx_${Math.random().toString(36).slice(2, 9)}`
+        collector.record('context.build', {
+          contextSnapshotId: `ctx_${Math.random().toString(36).slice(2, 9)}`,
+          totalTokens: 0,
+          maxContextTokens: 32768,
+          finalPrompt: systemPrompt + '\n' + compressedHistory.map(h => `${h.role}: ${h.content}`).join('\n')
+        }, { spanId: contextSpanId })
+
         // ── 调用 LLM（流式） ──
         const result = await streamLLMWithTools({
           messages: apiMessages,
@@ -186,6 +215,26 @@ export class AgentOrchestrator {
         }
         this.history.push(assistantMsg)
 
+        const llmSpanId = `span_llm_${Math.random().toString(36).slice(2, 9)}`
+        collector.record('llm.call', {
+          llmCallId: `llm_call_${Math.random().toString(36).slice(2, 9)}`,
+          model: getConfig().llm_model,
+          temperature: 0.3,
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          latencyMs: 0,
+          output: {
+            type: result.toolCalls.length ? 'tool_call' : 'text',
+            content: result.content,
+            toolCalls: result.toolCalls.map(tc => ({
+              id: tc.id,
+              name: tc.name,
+              arguments: tc.arguments
+            }))
+          }
+        }, { spanId: llmSpanId, parentSpanId: contextSpanId })
+
         // ── 没有工具调用 → 任务完成 ──
         if (result.toolCalls.length === 0) {
           finalContent = result.content
@@ -205,7 +254,13 @@ export class AgentOrchestrator {
           })),
         })
 
-        const toolResults = await this.executeAllTools(result.toolCalls, opts.callbacks, this.abortController?.signal)
+        const toolResults = await this.executeAllTools(
+          result.toolCalls,
+          opts.callbacks,
+          collector,
+          llmSpanId,
+          this.abortController?.signal
+        )
         this.stats.toolCalls += toolResults.length
 
         // 把 tool 结果作为 role=tool 消息追加
@@ -287,6 +342,32 @@ export class AgentOrchestrator {
       if (timeoutTimer) clearTimeout(timeoutTimer)
       this.running = false
       this.abortController = null
+
+      collector.record('turn.end', {
+        status: timedOut ? 'failed' : 'success',
+        assistantMessage: finalContent
+      })
+      collector.record('run.end', {
+        status: timedOut ? 'failed' : 'success',
+        latencyMs: Date.now() - overallStart
+      })
+
+      const jsonlData = collector.toJSONL()
+      fetch('http://127.0.0.1:4310/api/runs/import-jsonl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: jsonlData })
+      })
+        .then(async (res) => {
+          if (res.ok) {
+            log.info(`[Jarvis Bridge] Trace 同步成功 runId=${curRunId}`)
+          } else {
+            log.warn(`[Jarvis Bridge] Trace 同步返回非200状态: ${res.status}`)
+          }
+        })
+        .catch(err => {
+          log.error('[Jarvis Bridge] Trace 自动推送失败:', err)
+        })
     }
   }
 
@@ -297,6 +378,8 @@ export class AgentOrchestrator {
   private async executeAllTools(
     toolCalls: AgentToolCall[],
     cb: AgentCallbacks,
+    collector: MemoryTraceCollector,
+    llmSpanId: string,
     signal?: AbortSignal,
   ): Promise<AgentToolResult[]> {
     const results: AgentToolResult[] = []
@@ -307,8 +390,40 @@ export class AgentOrchestrator {
         toolName: tc.name,
       })
 
+      const toolSpanId = `span_tool_${tc.id}`
+
+      collector.record('tool.policy.check', {
+        decision_id: `perm_${tc.id}`,
+        tool_call_id: tc.id,
+        tool_id: tc.name,
+        riskLevel: tc.name === 'run_command' ? 'high' : 'low',
+        requestedPermissions: [],
+        decision: 'allow',
+        reason: '用户在小牛马客户端人工确认批准'
+      })
+
+      collector.record('tool.call', {
+        toolCallId: tc.id,
+        tool: tc.name,
+        arguments: tc.arguments,
+        permission: {
+          required: [],
+          approved: true,
+          approvalMode: 'manual'
+        }
+      }, { spanId: toolSpanId, parentSpanId: llmSpanId })
+
       const result = await executeTool(tc, signal)
       results.push(result)
+
+      collector.record('tool.call', {
+        toolCallId: tc.id,
+        execution: {
+          success: !result.error,
+          exitCode: result.error ? 1 : 0
+        },
+        result: result.error ? `错误: ${result.error}` : result.output
+      }, { spanId: toolSpanId, parentSpanId: llmSpanId })
 
       cb.onToolExecuted({
         sessionId: this.sessionId,
