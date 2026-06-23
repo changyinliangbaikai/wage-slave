@@ -7,6 +7,7 @@ export interface TraceEvent {
   projectId: string
   sessionId: string
   runId: string
+  turnId: string
   payload: Record<string, any>
   spanId?: string
   parentSpanId?: string
@@ -15,11 +16,13 @@ export interface TraceEvent {
 export class MemoryTraceCollector {
   private readonly sessionId: string
   private readonly runId: string
+  private readonly turnId: string
   private readonly events: TraceEvent[] = []
 
   constructor(sessionId: string) {
     this.sessionId = sessionId
     this.runId = randomUUID()
+    this.turnId = `turn_${randomUUID()}`
   }
 
   getRunId(): string {
@@ -38,6 +41,7 @@ export class MemoryTraceCollector {
       projectId: 'xiao-niu-ma-integration',
       sessionId: this.sessionId,
       runId: this.runId,
+      turnId: this.turnId,
       payload: structuredClone(payload),
     }
 

@@ -180,9 +180,10 @@ export class AgentOrchestrator {
           ...compressedHistory.map(m => historyToApi(m)),
         ]
 
+        const contextSnapshotId = `ctx_snap_${Math.random().toString(36).slice(2, 9)}`
         const contextSpanId = `span_ctx_${Math.random().toString(36).slice(2, 9)}`
         collector.record('context.build', {
-          contextSnapshotId: `ctx_${Math.random().toString(36).slice(2, 9)}`,
+          contextSnapshotId,
           totalTokens: 0,
           maxContextTokens: 32768,
           finalPrompt: systemPrompt + '\n' + compressedHistory.map(h => `${h.role}: ${h.content}`).join('\n')
@@ -228,6 +229,7 @@ export class AgentOrchestrator {
         const llmSpanId = `span_llm_${Math.random().toString(36).slice(2, 9)}`
         collector.record('llm.call', {
           llmCallId: `llm_call_${Math.random().toString(36).slice(2, 9)}`,
+          contextSnapshotId,
           model: getConfig().llm_model,
           temperature: 0.3,
           promptTokens: 0,
@@ -433,9 +435,17 @@ export class AgentOrchestrator {
 
       collector.record('tool.call', {
         toolCallId: tc.id,
+        tool: tc.name,
+        arguments: tc.arguments,
+        permission: {
+          required: [],
+          approved: true,
+          approvalMode: 'manual'
+        },
         execution: {
           success: !result.error,
-          exitCode: result.error ? 1 : 0
+          exitCode: result.error ? 1 : 0,
+          latencyMs: result.durationMs ?? 0 // 填充真实工具耗时
         },
         result: result.error ? `错误: ${result.error}` : result.output
       }, { spanId: toolSpanId, parentSpanId: llmSpanId })
