@@ -227,6 +227,7 @@ function createOrFocusSubWindow(
     minHeight: options.minHeight,
     title: options.title,
     resizable: options.resizable ?? true,
+    backgroundColor: '#f7f5ef',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -310,6 +311,7 @@ export function openChatWindow(): void {
     minHeight: 500,
     title: '小小牛马 · 对话',
     resizable: true,
+    backgroundColor: '#f7f5ef',
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

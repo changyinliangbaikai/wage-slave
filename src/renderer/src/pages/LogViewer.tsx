@@ -71,7 +71,7 @@ export default function LogViewer() {
   // 覆盖 App.css 的 body overflow:hidden
   useLayoutEffect(() => {
     document.body.style.overflow = 'auto'
-    document.body.style.background = '#fffef5'
+    document.body.style.background = '#f7f5ef'
     return () => { document.body.style.overflow = '' }
   }, [])
 

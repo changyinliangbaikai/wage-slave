@@ -14,7 +14,7 @@
  *   └────────────────────────────────────────────┘
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useLayoutEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -47,6 +47,13 @@ export default function Chat() {
     loadSession,
     switchMode,
   } = useChat('chat')
+
+  useLayoutEffect(() => {
+    document.body.style.background = '#f7f5ef'
+    return () => {
+      document.body.style.background = ''
+    }
+  }, [])
 
   const [input, setInput] = useState('')
   const [showSessions, setShowSessions] = useState(false)
