@@ -186,7 +186,12 @@ export class AgentOrchestrator {
           contextSnapshotId,
           totalTokens: 0,
           maxContextTokens: 32768,
-          finalPrompt: systemPrompt + '\n' + compressedHistory.map(h => `${h.role}: ${h.content}`).join('\n')
+          finalPrompt: systemPrompt + '\n' + compressedHistory.map(h => `${h.role}: ${h.content}`).join('\n'),
+          input: {
+            userInput: opts.userInput,
+            historyCount: compressedHistory.length,
+            skill: matched ? matched.skill.name : 'none'
+          }
         }, { spanId: contextSpanId })
 
         // ── 调用 LLM（流式） ──
@@ -236,6 +241,9 @@ export class AgentOrchestrator {
           completionTokens: 0,
           totalTokens: 0,
           latencyMs,
+          input: {
+            messages: apiMessages
+          },
           output: {
             type: result.toolCalls.length ? 'tool_call' : 'text',
             content: result.content,
@@ -416,13 +424,18 @@ export class AgentOrchestrator {
         requestedPermissions: [],
         decision: 'allow',
         status: 'allow', // 显式填入状态
-        reason: '用户在小牛马客户端人工确认批准'
+        reason: '用户在小牛马客户端人工确认批准',
+        input: {
+          tool: tc.name,
+          arguments: tc.arguments
+        }
       }, { spanId: `span_perm_${tc.id}`, parentSpanId: llmSpanId })
 
       collector.record('tool.call', {
         toolCallId: tc.id,
         tool: tc.name,
         arguments: tc.arguments,
+        input: tc.arguments,
         permission: {
           required: [],
           approved: true,
@@ -437,6 +450,7 @@ export class AgentOrchestrator {
         toolCallId: tc.id,
         tool: tc.name,
         arguments: tc.arguments,
+        input: tc.arguments,
         permission: {
           required: [],
           approved: true,
