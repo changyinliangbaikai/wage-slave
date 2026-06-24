@@ -26,7 +26,7 @@ import type {
   AgentToolExecutedPayload,
   AIChatAttachment,
 } from '@shared/types'
-import { buildSystemPrompt, buildAgentContext } from './system-prompt'
+import { buildSystemPrompt, buildAgentContext, buildDynamicContext } from './system-prompt'
 import { getActiveToolSchemas, getToolDescription } from './tool-registry'
 import { executeTool } from './tool-executor'
 import { streamLLMWithTools } from './llm-tool-client'
@@ -152,16 +152,6 @@ export class AgentOrchestrator {
       this.history = [...opts.history]
       this.stats = { iterations: 0, toolCalls: 0, totalDurationMs: 0 }
 
-      // ── 把用户输入加入 history ──
-      const userMsg: AgentMessage = {
-        id: genMsgId('user'),
-        role: 'user',
-        content: opts.userInput,
-        attachments: opts.attachments,
-        createdAt: Date.now(),
-      }
-      this.history.push(userMsg)
-
       // ── 技能匹配：基于用户输入命中一个已启用 skill，整轮注入其引导 ──
       const matched = matchSkill(opts.userInput)
       const skillAddition = matched ? buildSkillPromptAddition(matched.skill) : undefined
@@ -169,14 +159,28 @@ export class AgentOrchestrator {
         log.info(`[Agent] sessionId=${this.sessionId} 激活技能: ${matched.skill.name}`)
       }
 
+      // ── 把用户输入加入 history（同时挂载一次性静态环境快照以供 Prompt Caching） ──
+      const userMsg: AgentMessage = {
+        id: genMsgId('user'),
+        role: 'user',
+        content: opts.userInput,
+        attachments: opts.attachments,
+        createdAt: Date.now(),
+      }
+      ;(userMsg as any).dynamicContext = buildDynamicContext(buildAgentContext())
+      if (skillAddition) {
+        ;(userMsg as any).skillAdditionText = `\n# === 激活技能 ===\n${skillAddition}`
+      }
+      this.history.push(userMsg)
+
       while (this.stats.iterations < maxIterations) {
         if (this.abortController.signal.aborted) break
 
         this.stats.iterations++
         log.info(`[Agent] 第 ${this.stats.iterations} 轮 sessionId=${this.sessionId}`)
 
-        // 每轮都重新构建 system prompt（注入最新时间/待办状态 + 命中的技能引导）
-        const systemPrompt = buildSystemPrompt(buildAgentContext(), skillAddition)
+        // 每轮都获取静态 system prompt（支持长期 Prompt Caching）
+        const systemPrompt = buildSystemPrompt()
         const tools = getActiveToolSchemas()
         // 压缩历史：仅本轮 LLM 调用使用，this.history 保持完整以便会话持久化
         const compressedHistory = compressHistoryForLLM(this.history)
@@ -184,6 +188,8 @@ export class AgentOrchestrator {
           { role: 'system' as const, content: systemPrompt },
           ...compressedHistory.map(m => historyToApi(m)),
         ]
+
+        // 动态环境上下文与激活技能已被永久挂载在 user 消息中，此处无需再次拼接，保证 history 链条内容一致
 
         const contextSnapshotId = `ctx_snap_${Math.random().toString(36).slice(2, 9)}`
         const contextSpanId = `span_ctx_${Math.random().toString(36).slice(2, 9)}`
@@ -278,6 +284,17 @@ export class AgentOrchestrator {
           createdAt: Date.now(),
         }
         this.history.push(assistantMsg)
+
+        // ── 检查是否遭遇截断 (Out of Token) ──
+        if (result.finishReason === 'length') {
+          log.warn(`[Agent] sessionId=${this.sessionId} 遭遇 Token 截断，自动插入续写提示`)
+          this.history.push({
+            id: genMsgId('user'),
+            role: 'user',
+            content: `[System Reminder: Output token limit hit. Please resume your response directly from where you were cut off. Do not apologize, do not summarize, just pick up mid-thought and continue.]`,
+            createdAt: Date.now(),
+          })
+        }
 
         const llmSpanId = `span_llm_${Math.random().toString(36).slice(2, 9)}`
         collector.record('llm.call', {
@@ -597,13 +614,23 @@ function historyToApi(m: AgentMessage): {
     }
   }
 
-  // user 角色：如果有附件，拼接附件内容到 content
-  if (m.role === 'user' && m.attachments && m.attachments.length > 0) {
-    const content = buildContentWithAttachments(m.content, m.attachments)
+  // user 角色：如果有附件，拼接附件内容到 content，再追加环境与技能快照
+  if (m.role === 'user') {
+    let content = m.content
+    if (m.attachments && m.attachments.length > 0) {
+      content = buildContentWithAttachments(m.content, m.attachments)
+    }
+    if ((m as any).dynamicContext) {
+      content = content + '\n' + (m as any).dynamicContext
+    }
+    if ((m as any).skillAdditionText) {
+      content = content + '\n' + (m as any).skillAdditionText
+    }
     return { role: m.role, content }
   }
 
-  return { role: m.role, content: m.content }
+  // 兜底：assistant 无 tool_calls、或其他未预期的角色
+  return { role: m.role as any, content: m.content || '' }
 }
 
 /**
