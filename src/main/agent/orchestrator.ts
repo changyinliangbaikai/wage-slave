@@ -103,6 +103,8 @@ export class AgentOrchestrator {
 
     const collector = new MemoryTraceCollector(this.sessionId)
     const curRunId = collector.getRunId()
+    let totalPromptTokens = 0
+    let totalCompletionTokens = 0
 
     collector.record('run.start', {
       name: `小牛马任务 · ${opts.userInput.slice(0, 30)}`,
@@ -112,7 +114,10 @@ export class AgentOrchestrator {
       skillVersions: ['xiao-niu-ma-agent@2.1.0'],
       toolSchemaVersion: 'xiao-niu-ma-tools@v2.1',
       runtimeVersion: 'xiao-niu-ma-runtime@2.1.0',
-      contextStrategyVersion: 'default'
+      contextStrategyVersion: 'default',
+      agentId: 'xiao-niu-ma',
+      agentName: '小小牛马',
+      agentDescription: '集成在 Jarvis Studio 中的本地桌面助手智能体（小小牛马）。'
     })
 
     const files = opts.attachments
@@ -182,11 +187,49 @@ export class AgentOrchestrator {
 
         const contextSnapshotId = `ctx_snap_${Math.random().toString(36).slice(2, 9)}`
         const contextSpanId = `span_ctx_${Math.random().toString(36).slice(2, 9)}`
+
+        const segments = [
+          {
+            id: `seg_system_prompt_${Math.random().toString(36).slice(2, 9)}`,
+            type: 'system_prompt',
+            name: 'xiao-niu-ma-system-prompt',
+            version: '2.1.0',
+            preview: systemPrompt,
+            tokens: 0,
+            included: true,
+            priority: 100,
+            action: 'keep'
+          },
+          {
+            id: `seg_available_tools_${Math.random().toString(36).slice(2, 9)}`,
+            type: 'tool_descriptions',
+            name: 'available-tools',
+            preview: tools.map(t => t.function.name).join(', '),
+            tokens: 0,
+            included: true,
+            priority: 80,
+            action: 'keep',
+            metadata_json: JSON.stringify(tools),
+            tools: tools
+          },
+          {
+            id: `seg_conversation_history_${Math.random().toString(36).slice(2, 9)}`,
+            type: 'conversation_history',
+            name: 'previous-turns',
+            preview: compressedHistory.map(h => `${h.role}: ${h.content}`).join('\n'),
+            tokens: 0,
+            included: true,
+            priority: 60,
+            action: 'keep'
+          }
+        ]
+
         collector.record('context.build', {
           contextSnapshotId,
           totalTokens: 0,
           maxContextTokens: 32768,
           finalPrompt: systemPrompt + '\n' + compressedHistory.map(h => `${h.role}: ${h.content}`).join('\n'),
+          segments,
           input: {
             userInput: opts.userInput,
             historyCount: compressedHistory.length,
@@ -211,6 +254,11 @@ export class AgentOrchestrator {
           },
         })
         const latencyMs = Date.now() - llmStart
+
+        const promptTokens = result.usage?.prompt_tokens ?? 0
+        const completionTokens = result.usage?.completion_tokens ?? 0
+        totalPromptTokens += promptTokens
+        totalCompletionTokens += completionTokens
 
         if (result.aborted) break
 
@@ -237,12 +285,20 @@ export class AgentOrchestrator {
           contextSnapshotId,
           model: getConfig().llm_model,
           temperature: 0.3,
-          promptTokens: 0,
-          completionTokens: 0,
-          totalTokens: 0,
+          maxOutputTokens: 4096,
+          promptTokens: result.usage?.prompt_tokens ?? 0,
+          completionTokens: result.usage?.completion_tokens ?? 0,
+          totalTokens: result.usage?.total_tokens ?? 0,
           latencyMs,
+          usage: result.usage,
+          prompt_tokens_details: result.usage?.prompt_tokens_details,
+          completion_tokens_details: (result.usage as any)?.completion_tokens_details,
+          prompt_cache_hit_tokens: (result.usage as any)?.prompt_tokens_details?.cached_tokens ?? 0,
+          prompt_cache_miss_tokens: (result.usage?.prompt_tokens ?? 0) - ((result.usage as any)?.prompt_tokens_details?.cached_tokens ?? 0),
+          reasoning_tokens: (result.usage as any)?.completion_tokens_details?.reasoning_tokens ?? 0,
           input: {
-            messages: apiMessages
+            messages: apiMessages,
+            tools: tools
           },
           output: {
             type: result.toolCalls.length ? 'tool_call' : 'text',
@@ -373,7 +429,10 @@ export class AgentOrchestrator {
       })
       collector.record('run.end', {
         status: executionStatus,
-        latencyMs: Date.now() - overallStart
+        latencyMs: Date.now() - overallStart,
+        promptTokens: totalPromptTokens,
+        completionTokens: totalCompletionTokens,
+        totalTokens: totalPromptTokens + totalCompletionTokens
       })
 
       const jsonlData = collector.toJSONL()

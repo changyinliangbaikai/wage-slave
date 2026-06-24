@@ -28,6 +28,15 @@ export interface StreamResult {
   finishReason: string | null
   /** 是否是用户主动 abort */
   aborted: boolean
+  /** Token 消耗 Usage 信息 */
+  usage?: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+    prompt_tokens_details?: {
+      cached_tokens?: number
+    }
+  }
 }
 
 export interface StreamLLMParams {
@@ -130,7 +139,7 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
   // 工具调用按 index 增量累积（OpenAI 协议）
   const toolBuffer = new Map<number, { id: string; name: string; arguments: string }>()
 
-  const body = {
+  const body: Record<string, any> = {
     model,
     messages: params.messages,
     tools: params.tools,
@@ -138,6 +147,7 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
     temperature: params.temperature ?? 0.3,
     max_tokens: params.maxTokens ?? 4096,
     stream: true,
+    stream_options: { include_usage: true }
   }
 
   log.info(`[AgentLLM] 发起请求 model=${model} messages=${params.messages.length} tools=${params.tools.length}`)
@@ -175,6 +185,7 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let sseBuffer = ''
+  let usage: StreamResult['usage'] = undefined
 
   try {
     outer: while (true) {
@@ -197,6 +208,10 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
           chunk = JSON.parse(data) as SSEChunk
         } catch {
           continue
+        }
+
+        if (chunk.usage) {
+          usage = chunk.usage
         }
 
         const choice = chunk.choices?.[0]
@@ -287,6 +302,7 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
     toolCalls,
     finishReason,
     aborted: false,
+    usage,
   }
 }
 
@@ -305,12 +321,13 @@ async function streamLLMReactFallback(params: StreamLLMParams, originalError: st
   let finishReason: string | null = null
 
   const fallbackMessages = injectFallbackProtocol(params.messages, params.tools, originalError)
-  const body = {
+  const body: Record<string, any> = {
     model,
     messages: fallbackMessages,
     temperature: params.temperature ?? 0.3,
     max_tokens: params.maxTokens ?? 4096,
     stream: true,
+    stream_options: { include_usage: true }
   }
 
   let res: Response
@@ -342,6 +359,7 @@ async function streamLLMReactFallback(params: StreamLLMParams, originalError: st
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
   let sseBuffer = ''
+  let usage: StreamResult['usage'] = undefined
 
   try {
     outer: while (true) {
@@ -364,6 +382,10 @@ async function streamLLMReactFallback(params: StreamLLMParams, originalError: st
           chunk = JSON.parse(data) as SSEChunk
         } catch {
           continue
+        }
+
+        if (chunk.usage) {
+          usage = chunk.usage
         }
 
         const choice = chunk.choices?.[0]
@@ -411,6 +433,7 @@ async function streamLLMReactFallback(params: StreamLLMParams, originalError: st
     toolCalls: parsed.toolCalls,
     finishReason,
     aborted: false,
+    usage,
   }
 }
 
@@ -573,6 +596,14 @@ interface SSEChunk {
     }
     finish_reason?: string | null
   }>
+  usage?: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+    prompt_tokens_details?: {
+      cached_tokens?: number
+    }
+  }
 }
 
 function isAbortError(e: unknown): boolean {
