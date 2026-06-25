@@ -63,7 +63,12 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'edit_file',
-      description: '在文件中精确替换文本片段。old_string 必须在文件中出现且默认只替换第一处，replace_all=true 则替换全部。',
+      description:
+        '在文件中精确替换文本片段。\n' +
+        '【关键约束】：在编辑前必须先 read_file 读过该文件，否则容易因 old_string 不完整导致替换失败。\n' +
+        '【唯一性】：old_string 在文件中必须只出现 1 次；若有多处需要替换，设置 replace_all=true。\n' +
+        '【容错】：精确匹配失败时，工具会尝试忽略行尾空白与缩进差异做模糊匹配，并在结果中提示。\n' +
+        '【最佳实践】：old_string 包含足够上下文（建议 2-3 行）以保证唯一性；只替换需要变动的部分，不要把整段函数 copy-paste。',
       parameters: {
         type: 'object',
         properties: {
@@ -80,12 +85,18 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'list_files',
-      description: '列出目录中的文件和子目录。可选 glob 模式过滤（如 *.md）。',
+      description:
+        '列出目录中的文件和子目录，支持按 glob 过滤、按深度递归展开。\n' +
+        '【何时使用】：快速了解目录结构、查看子目录列表。\n' +
+        '【禁止使用 run_command 调用 ls】：本工具已封装跨平台递归遍历与噪音目录排除。\n' +
+        '常见参数：depth=2 可一次性看清两层目录结构；show_size=true 显示文件大小。',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: '目录路径' },
-          pattern: { type: 'string', description: 'glob 过滤模式，如 "*.ts"、"report-*.md"' },
+          pattern: { type: 'string', description: 'glob 过滤模式，如 "*.ts"、"report-*.md"。仅对叶子节点（文件名）生效。' },
+          depth: { type: 'integer', description: '递归深度（1=仅当前层；2=展开两层；最大 5）', minimum: 1, maximum: 5 },
+          show_size: { type: 'boolean', description: '是否显示文件大小，默认 false' },
         },
         required: ['path'],
       },
@@ -95,7 +106,7 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'search_files',
-      description: '在指定目录中搜索包含特定文本的文件（递归）。返回命中文件路径列表。跨平台用 Node 实现，无依赖。',
+      description: '在指定目录中搜索包含特定文本的文件（递归）。返回命中文件路径列表。【若需要正则、显示行号或上下文，请优先使用 grep_code】',
       parameters: {
         type: 'object',
         properties: {
@@ -109,12 +120,208 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     },
   },
 
+  // ── 代码搜索（编程能力强化） ─────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'grep_code',
+      description:
+        '在代码中搜索文本（支持完整正则）。底层优先使用 ripgrep，未安装时回退 Node 实现。\n' +
+        '【何时使用】：需要按内容查找代码（如查找函数定义、调用点、TODO 注释、错误信息等）。\n' +
+        '【禁止使用 run_command 调用 grep/rg/findstr】：本工具已对正则、大小写、上下文、文件过滤做了完善封装，并自动排除 node_modules/.git 等噪音目录。\n' +
+        '【常见用法】：1) 找函数定义：pattern="function\\s+myFunc"  2) 找引用：pattern="myVar"  3) 找类型：pattern="interface\\s+MyType"  4) 多行模式无此工具，请用 read_file 直接读取定位\n' +
+        '输出格式：每行 "文件:行号:内容"。',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: {
+            type: 'string',
+            description: '正则表达式搜索模式。注意 ripgrep 语法：字面量大括号要转义 "interface\\\\{\\\\}"。',
+          },
+          path: {
+            type: 'string',
+            description: '搜索路径（文件或目录），默认为当前工作目录。必须在白名单内。',
+          },
+          include: {
+            type: 'string',
+            description: 'glob 文件过滤，如 "*.ts"、"*.{js,jsx}"、"src/**/*.tsx"。',
+          },
+          context_lines: {
+            type: 'integer',
+            description: '匹配行前后各显示 N 行上下文，默认 0，范围 0-10。仅 output_mode=content 时生效。',
+            minimum: 0,
+            maximum: 10,
+          },
+          case_insensitive: {
+            type: 'boolean',
+            description: '是否大小写不敏感，默认 false。',
+          },
+          max_results: {
+            type: 'integer',
+            description: '最大匹配数（行数或文件数），默认 50，最大 500。',
+            minimum: 1,
+            maximum: 500,
+          },
+          output_mode: {
+            type: 'string',
+            enum: ['content', 'files_with_matches', 'count'],
+            description: 'content=显示匹配行（默认）；files_with_matches=仅显示文件路径；count=显示每个文件的匹配数。',
+          },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'glob_files',
+      description:
+        '按 glob 模式查找文件，支持 ** 递归、{a,b} 大括号等完整语法。\n' +
+        '【何时使用】：按文件名/路径模式查找文件（如查找所有测试文件、所有配置文件等）。\n' +
+        '【禁止使用 run_command 调用 find/ls -R】：本工具已封装超时保护、噪音目录排除、结果截断。\n' +
+        '【常见用法】：1) 所有测试文件：pattern="**/*.test.{ts,tsx}"  2) 配置文件：pattern="**/{package,tsconfig}.json"  3) 某目录下的所有 ts：pattern="src/**/*.ts"\n' +
+        '【说明】：默认不匹配以 . 开头的隐藏文件；自动排除 node_modules/.git/dist 等噪音目录。',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: {
+            type: 'string',
+            description: 'glob 模式，如 "**/*.test.ts"、"src/**/index.{js,ts}"。',
+          },
+          path: {
+            type: 'string',
+            description: '搜索根目录，默认为当前工作目录。必须在白名单内。',
+          },
+          max_results: {
+            type: 'integer',
+            description: '最大返回文件数，默认 100，最大 500。',
+            minimum: 1,
+            maximum: 500,
+          },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+
+  // ── Git 只读工具（无需二次确认） ─────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'git_status',
+      description:
+        '查看 Git 工作区状态（git status --short --branch 的封装）。\n' +
+        '【何时使用】：需要了解当前工作区有哪些未提交的修改、当前所在分支。\n' +
+        '【禁止使用 run_command 执行 git status】：本工具是只读操作，无需二次确认，体验更顺畅。',
+      parameters: {
+        type: 'object',
+        properties: {
+          work_dir: { type: 'string', description: '工作目录，默认 cwd（必须在白名单内）' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_diff',
+      description:
+        '查看 Git 差异（git diff 的封装）。\n' +
+        '【何时使用】：需要查看具体的代码改动内容（未暂存、已暂存或对比某个 ref）。\n' +
+        '【禁止使用 run_command 执行 git diff】：本工具是只读操作。',
+      parameters: {
+        type: 'object',
+        properties: {
+          work_dir: { type: 'string', description: '工作目录，默认 cwd' },
+          paths: {
+            type: 'array',
+            description: '指定路径过滤；默认全部文件',
+            items: { type: 'string' },
+          },
+          cached: { type: 'boolean', description: '是否查看已暂存的修改（git diff --cached），默认 false' },
+          name_only: { type: 'boolean', description: '仅显示文件名列表，默认 false' },
+          ref: { type: 'string', description: '与某个提交/分支比较，如 HEAD~1、main' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'git_log',
+      description:
+        '查看 Git 提交历史（git log 的封装，输出格式：哈希 日期 作者 主题）。\n' +
+        '【何时使用】：了解项目最近变更、查看某个文件的修改历史。\n' +
+        '【禁止使用 run_command 执行 git log】：本工具是只读操作。',
+      parameters: {
+        type: 'object',
+        properties: {
+          work_dir: { type: 'string', description: '工作目录，默认 cwd' },
+          limit: { type: 'integer', description: '显示多少条提交，默认 10，最大 50', minimum: 1, maximum: 50 },
+          file: { type: 'string', description: '仅显示某文件的提交历史' },
+          with_stat: { type: 'boolean', description: '是否包含改动统计 (--stat)，默认 false' },
+          ref: { type: 'string', description: '显示某个分支/ref 的日志' },
+        },
+      },
+    },
+  },
+
+  // ── Web 网络工具 ─────────────────────────────────
+  {
+    type: 'function',
+    function: {
+      name: 'web_fetch',
+      description:
+        '抓取网页内容并转为可读文本（自动剥离 HTML 标签 / 脚本 / 样式）。\n' +
+        '【何时使用】：用户提供具体 URL 时获取内容、阅读文档、查看 API 返回等。\n' +
+        '【限制】：单次最多 1MB 响应；输出截断到 max_chars 指定的字符数。',
+      parameters: {
+        type: 'object',
+        properties: {
+          url: { type: 'string', description: '要抓取的 HTTP/HTTPS URL' },
+          max_chars: { type: 'integer', description: '返回的最大字符数，默认 8000，最大 50000', minimum: 100, maximum: 50000 },
+        },
+        required: ['url'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description:
+        '搜索引擎查询（基于 DuckDuckGo HTML 端点，免 API key）。\n' +
+        '【何时使用】：需要查找最新资料、解决错误信息、查找文档链接等。\n' +
+        '【返回】：标题、URL、摘要 三列形式。\n' +
+        '【限制】：依赖 DuckDuckGo 可访问性；用户在受限网络下可能返回失败，此时请改用 web_fetch 直接抓取已知 URL。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '搜索关键词' },
+          max_results: { type: 'integer', description: '返回的最大结果数，默认 5，最大 20', minimum: 1, maximum: 20 },
+        },
+        required: ['query'],
+      },
+    },
+  },
+
   // ── 命令执行 ─────────────────────────────────
   {
     type: 'function',
     function: {
       name: 'run_command',
-      description: '在系统 shell 中执行命令。默认 30s 超时；命令黑名单（rm -rf / 等）会被拒绝。请优先用专用工具代替命令（如 list_files 而不是 ls）。',
+      description:
+        '在系统 shell 中执行命令。默认 30s 超时；命令黑名单（rm -rf 等）会被拒绝。\n' +
+        '【严禁使用 run_command 代替专用工具】：\n' +
+        '  - 读文件 → read_file（不要用 cat/head/tail/sed）\n' +
+        '  - 写文件 → write_file（不要用 echo > / cat << EOF）\n' +
+        '  - 编辑文件 → edit_file（不要用 sed/awk）\n' +
+        '  - 列目录 → list_files（不要用 ls/dir）\n' +
+        '  - 搜索文件名 → glob_files（不要用 find）\n' +
+        '  - 搜索文件内容 → grep_code（不要用 grep/rg/findstr）\n' +
+        '  - 定时任务 → scheduler_create_task（不要用 cron/at/schtasks）\n' +
+        'run_command 仅适合：构建/测试命令（npm test、pytest）、git 读操作（git status / git diff / git log）、运行用户脚本等无对应专用工具的场景。',
       parameters: {
         type: 'object',
         properties: {
@@ -463,7 +670,7 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
  * 工具分组：仅用于 UI 渲染开关，不影响 LLM 调用协议
  * 给设置页一个清晰的"按类别批量启停"视图，比一字排开 N 个 checkbox 友好
  */
-export type ToolGroupId = 'file' | 'command' | 'data' | 'scheduler' | 'skill' | 'system' | 'control'
+export type ToolGroupId = 'file' | 'code' | 'git' | 'command' | 'data' | 'scheduler' | 'skill' | 'system' | 'control' | 'web'
 
 export interface ToolGroupMeta {
   id: ToolGroupId
@@ -483,6 +690,24 @@ export const AGENT_TOOL_GROUPS: ToolGroupMeta[] = [
     label: '文件操作',
     description: '读取 / 写入 / 编辑 / 列目录 / 搜索文件（仅限白名单路径）',
     toolNames: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_files'],
+  },
+  {
+    id: 'code',
+    label: '代码搜索',
+    description: '正则代码搜索 / Glob 文件查找（专为编程任务设计，避免回退到 grep/find 命令）',
+    toolNames: ['grep_code', 'glob_files'],
+  },
+  {
+    id: 'git',
+    label: 'Git 只读',
+    description: 'Git 工作区状态 / 差异 / 提交历史查询（只读，无需二次确认）',
+    toolNames: ['git_status', 'git_diff', 'git_log'],
+  },
+  {
+    id: 'web',
+    label: '网络工具',
+    description: '抓取网页 / 搜索引擎查询（依赖网络可访问性）',
+    toolNames: ['web_fetch', 'web_search'],
   },
   {
     id: 'command',

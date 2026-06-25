@@ -167,7 +167,7 @@ export class AgentOrchestrator {
         attachments: opts.attachments,
         createdAt: Date.now(),
       }
-      ;(userMsg as any).dynamicContext = buildDynamicContext(buildAgentContext())
+      ;(userMsg as any).dynamicContext = await buildDynamicContext(buildAgentContext())
       if (skillAddition) {
         ;(userMsg as any).skillAdditionText = `\n# === 激活技能 ===\n${skillAddition}`
       }
@@ -472,7 +472,14 @@ export class AgentOrchestrator {
   }
 
   /**
-   * 执行一组工具调用（顺序执行，避免对本地数据并发写竞争）
+   * 执行一组工具调用
+   *
+   * 调度策略（参考 Claude Code 的并发安全分组）：
+   *  - 把工具切成连续块，每块要么全部"并发安全"要么含至少一个"不安全"
+   *  - 并发安全块：用 Promise.all 并行执行（如多个 read_file / grep_code）
+   *  - 不安全块：顺序执行（如 write_file / run_command）
+   *  - 这样能在多读场景下显著加速，同时保证写竞争安全
+   *
    * 每一步都通过 IPC 推送，让 UI 实时看到进度
    */
   private async executeAllTools(
@@ -482,75 +489,118 @@ export class AgentOrchestrator {
     llmSpanId: string,
     signal?: AbortSignal,
   ): Promise<AgentToolResult[]> {
-    const results: AgentToolResult[] = []
-    for (const tc of toolCalls) {
-      cb.onToolExecuting({
-        sessionId: this.sessionId,
-        toolId: tc.id,
-        toolName: tc.name,
-      })
+    // 保留原始顺序的结果索引：toolCalls[i] 对应 results[i]
+    const results: AgentToolResult[] = new Array(toolCalls.length)
 
-      const toolSpanId = `span_tool_${tc.id}`
+    // 切分成连续的"安全块/不安全块"
+    const buckets: Array<{ safe: boolean; calls: Array<{ tc: AgentToolCall; idx: number }> }> = []
+    for (let i = 0; i < toolCalls.length; i++) {
+      const tc = toolCalls[i]
+      const safe = isConcurrencySafe(tc.name)
+      const last = buckets[buckets.length - 1]
+      if (last && last.safe === safe) {
+        last.calls.push({ tc, idx: i })
+      } else {
+        buckets.push({ safe, calls: [{ tc, idx: i }] })
+      }
+    }
 
-      collector.record('tool.policy.check', {
-        decision_id: `perm_${tc.id}`,
-        tool_call_id: tc.id,
-        tool_id: tc.name,
-        riskLevel: tc.name === 'run_command' ? 'high' : 'low',
-        requestedPermissions: [],
-        decision: 'allow',
-        status: 'allow', // 显式填入状态
-        reason: '用户在小牛马客户端人工确认批准',
-        input: {
-          tool: tc.name,
-          arguments: tc.arguments
+    for (const bucket of buckets) {
+      if (bucket.safe && bucket.calls.length > 1) {
+        log.info(`[Agent] 并行执行 ${bucket.calls.length} 个只读工具: ${bucket.calls.map(c => c.tc.name).join(', ')}`)
+        const promises = bucket.calls.map(({ tc, idx }) =>
+          this.runOneTool(tc, cb, collector, llmSpanId, signal).then(r => {
+            results[idx] = r
+            return r
+          })
+        )
+        await Promise.all(promises)
+      } else {
+        // 不安全块或只有一个工具 → 顺序
+        for (const { tc, idx } of bucket.calls) {
+          results[idx] = await this.runOneTool(tc, cb, collector, llmSpanId, signal)
+          // 不安全工具有致命错误时早退（与原串行行为一致）
+          if (results[idx].fatal) break
         }
-      }, { spanId: `span_perm_${tc.id}`, parentSpanId: llmSpanId })
-
-      collector.record('tool.call', {
-        toolCallId: tc.id,
-        tool: tc.name,
-        arguments: tc.arguments,
-        input: tc.arguments,
-        permission: {
-          required: [],
-          approved: true,
-          approvalMode: 'manual'
-        }
-      }, { spanId: toolSpanId, parentSpanId: llmSpanId })
-
-      const result = await executeTool(tc, signal)
-      results.push(result)
-
-      collector.record('tool.call', {
-        toolCallId: tc.id,
-        tool: tc.name,
-        arguments: tc.arguments,
-        input: tc.arguments,
-        permission: {
-          required: [],
-          approved: true,
-          approvalMode: 'manual'
-        },
-        execution: {
-          success: !result.error,
-          exitCode: result.error ? 1 : 0,
-          latencyMs: result.durationMs ?? 0 // 填充真实工具耗时
-        },
-        result: result.error ? `错误: ${result.error}` : result.output
-      }, { spanId: toolSpanId, parentSpanId: llmSpanId })
-
-      cb.onToolExecuted({
-        sessionId: this.sessionId,
-        toolId: tc.id,
-        toolName: tc.name,
-        success: !result.error,
-        output: result.output,
-        error: result.error,
-        durationMs: result.durationMs,
-      })
+      }
     }
     return results
+  }
+
+  /** 执行单个工具调用并维护 trace + 回调 */
+  private async runOneTool(
+    tc: AgentToolCall,
+    cb: AgentCallbacks,
+    collector: MemoryTraceCollector,
+    llmSpanId: string,
+    signal?: AbortSignal,
+  ): Promise<AgentToolResult> {
+    cb.onToolExecuting({
+      sessionId: this.sessionId,
+      toolId: tc.id,
+      toolName: tc.name,
+    })
+
+    const toolSpanId = `span_tool_${tc.id}`
+
+    collector.record('tool.policy.check', {
+      decision_id: `perm_${tc.id}`,
+      tool_call_id: tc.id,
+      tool_id: tc.name,
+      riskLevel: tc.name === 'run_command' ? 'high' : 'low',
+      requestedPermissions: [],
+      decision: 'allow',
+      status: 'allow',
+      reason: '用户在小牛马客户端人工确认批准',
+      input: {
+        tool: tc.name,
+        arguments: tc.arguments
+      }
+    }, { spanId: `span_perm_${tc.id}`, parentSpanId: llmSpanId })
+
+    collector.record('tool.call', {
+      toolCallId: tc.id,
+      tool: tc.name,
+      arguments: tc.arguments,
+      input: tc.arguments,
+      permission: {
+        required: [],
+        approved: true,
+        approvalMode: 'manual'
+      }
+    }, { spanId: toolSpanId, parentSpanId: llmSpanId })
+
+    const result = await executeTool(tc, signal)
+
+    collector.record('tool.call', {
+      toolCallId: tc.id,
+      tool: tc.name,
+      arguments: tc.arguments,
+      input: tc.arguments,
+      permission: {
+        required: [],
+        approved: true,
+        approvalMode: 'manual'
+      },
+      execution: {
+        success: !result.error,
+        exitCode: result.error ? 1 : 0,
+        latencyMs: result.durationMs ?? 0
+      },
+      result: result.error ? `错误: ${result.error}` : result.output
+    }, { spanId: toolSpanId, parentSpanId: llmSpanId })
+
+    cb.onToolExecuted({
+      sessionId: this.sessionId,
+      toolId: tc.id,
+      toolName: tc.name,
+      success: !result.error,
+      output: result.output,
+      error: result.error,
+      durationMs: result.durationMs,
+    })
+
+    return result
   }
 
   /**
@@ -662,6 +712,32 @@ function formatFileSize(bytes: number): string {
 
 function genMsgId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * 工具是否可与同批其他工具并发执行
+ *
+ * 安全清单：只读、无外部副作用的工具可并发；
+ * 黑名单：写文件 / 改数据 / 改技能 / 调度任务 / 执行命令 / 系统操作 都不能并发。
+ *
+ * 为什么用白名单：宁可漏掉某个本可并发的新工具（性能略低）也不能误把写工具放进并发桶。
+ */
+function isConcurrencySafe(toolName: string): boolean {
+  const CONCURRENT_SAFE_TOOLS: ReadonlySet<string> = new Set([
+    // 文件读类
+    'read_file', 'list_files', 'search_files',
+    // 代码搜索
+    'grep_code', 'glob_files',
+    // Git 只读
+    'git_status', 'git_diff', 'git_log',
+    // 网络只读
+    'web_fetch', 'web_search',
+    // 小牛马数据读类
+    'get_today_log', 'get_todos', 'get_logs_range',
+    // 调度器/技能查询
+    'scheduler_list_tasks', 'skill_list', 'skill_get',
+  ])
+  return CONCURRENT_SAFE_TOOLS.has(toolName)
 }
 
 function getMaxIterations(override?: number): number {

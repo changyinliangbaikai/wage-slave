@@ -39,6 +39,9 @@ import { assertSafePath, expandHome, checkCommand, confirmCommandWithUser } from
 import { isToolEnabled } from './tool-registry'
 import { recordAgentAudit } from './audit-log'
 import { extractFileContent } from '../file-attachment/service'
+import { grepCode, globFiles } from './code-search'
+import { gitStatus, gitDiff, gitLog } from './git-tools'
+import { webFetch, webSearch } from './web-tools'
 import {
   getAllSkills,
   getSkillById,
@@ -79,6 +82,15 @@ export async function executeTool(call: AgentToolCall, signal?: AbortSignal): Pr
       case 'edit_file':    raw = await toolEditFile(call.arguments); break
       case 'list_files':   raw = await toolListFiles(call.arguments); break
       case 'search_files': raw = await toolSearchFiles(call.arguments); break
+      case 'grep_code':    raw = await toolGrepCode(call.arguments); break
+      case 'glob_files':   raw = await toolGlobFiles(call.arguments); break
+      // Git 只读
+      case 'git_status':   raw = await toolGitStatus(call.arguments); break
+      case 'git_diff':     raw = await toolGitDiff(call.arguments); break
+      case 'git_log':      raw = await toolGitLog(call.arguments); break
+      // Web 网络工具
+      case 'web_fetch':    raw = await toolWebFetch(call.arguments); break
+      case 'web_search':   raw = await toolWebSearch(call.arguments); break
       // 命令执行
       case 'run_command':  raw = await toolRunCommand(call.arguments, signal); break
       // 小牛马数据操作
@@ -222,7 +234,7 @@ async function toolEditFile(args: unknown): Promise<string> {
   if (replace_all) {
     const occurrences = countOccurrences(content, old_string)
     if (occurrences === 0) {
-      throw new Error(`未找到匹配文本: "${preview(old_string)}"`)
+      throw new Error(buildEditNotFoundError(content, old_string))
     }
     const updated = content.split(old_string).join(new_string)
     await fs.writeFile(target, updated, 'utf-8')
@@ -237,7 +249,20 @@ async function toolEditFile(args: unknown): Promise<string> {
 
   const idx = content.indexOf(old_string)
   if (idx === -1) {
-    throw new Error(`未找到匹配文本: "${preview(old_string)}"`)
+    // 精确匹配失败 → 尝试模糊匹配（忽略行尾空白与缩进差异）
+    const fuzzy = findFuzzyMatch(content, old_string)
+    if (fuzzy) {
+      const updated = content.slice(0, fuzzy.startIndex) + new_string + content.slice(fuzzy.endIndex)
+      await fs.writeFile(target, updated, 'utf-8')
+      recordAgentAudit({
+        tool: 'edit_file',
+        action: 'replace_one_fuzzy',
+        target,
+        summary: '模糊匹配替换 1 处',
+      })
+      return `已替换 1 处于 ${target}（注意：使用了模糊匹配，原文与 old_string 在空白字符上有差异）`
+    }
+    throw new Error(buildEditNotFoundError(content, old_string))
   }
   // 校验唯一性，避免误改
   const next = content.indexOf(old_string, idx + old_string.length)
@@ -255,20 +280,216 @@ async function toolEditFile(args: unknown): Promise<string> {
   return `已替换 1 处于 ${target}`
 }
 
-interface ListFilesArgs { path: string; pattern?: string }
+/**
+ * 编辑失败时构造一个对 LLM 友好的错误信息：包含相似行提示
+ * 为 LLM 提供"自我修正"的线索（哪一行最像它想替换的内容）
+ */
+function buildEditNotFoundError(content: string, oldString: string): string {
+  const similar = findMostSimilarLines(content, oldString, 3)
+  const base = `未找到匹配文本: "${preview(oldString)}"`
+  if (similar.length === 0) return base
+  const hint = similar.map(s => `  · 第 ${s.line} 行: "${preview(s.text, 80)}"`).join('\n')
+  return `${base}\n文件中最相似的位置：\n${hint}\n请重新阅读文件以获取确切上下文。`
+}
+
+/**
+ * 模糊匹配：先尝试忽略行尾空白，再尝试忽略统一缩进差异
+ * 命中时返回原文中的起止索引，调用方据此切片替换
+ */
+function findFuzzyMatch(
+  content: string,
+  oldString: string,
+): { startIndex: number; endIndex: number } | null {
+  // 策略 1：trim 行尾空白
+  const trimRight = (s: string) => s.split('\n').map(l => l.replace(/[ \t]+$/g, '')).join('\n')
+  const trimmedContent = trimRight(content)
+  const trimmedOld = trimRight(oldString)
+  let idx = trimmedContent.indexOf(trimmedOld)
+  if (idx !== -1) {
+    // 通过行号映射回原始 content 的索引
+    return mapTrimmedIndexToOriginal(content, trimmedContent, idx, trimmedOld.length)
+  }
+
+  // 策略 2：去掉每行前导空白后比较
+  const stripIndent = (s: string) => s.split('\n').map(l => l.trim()).join('\n')
+  const strippedContent = stripIndent(content)
+  const strippedOld = stripIndent(oldString)
+  idx = strippedContent.indexOf(strippedOld)
+  if (idx !== -1 && strippedOld.length > 10) {
+    // 仅在 old_string 较长时启用激进模糊匹配，避免误命中
+    return mapTrimmedIndexToOriginal(content, strippedContent, idx, strippedOld.length)
+  }
+
+  return null
+}
+
+/**
+ * 通过逐字符比对的方式，把"trimmed 后字符串"上的索引映射回原始字符串的索引
+ * trimmed 字符串和原始字符串的行数相同，只是每行去除了部分字符
+ */
+function mapTrimmedIndexToOriginal(
+  original: string,
+  trimmed: string,
+  trimmedStart: number,
+  trimmedLen: number,
+): { startIndex: number; endIndex: number } | null {
+  // 计算 trimmed 中起点对应的行号 + 列号
+  const before = trimmed.slice(0, trimmedStart)
+  const startLine = (before.match(/\n/g) ?? []).length
+  const startCol = trimmedStart - (before.lastIndexOf('\n') + 1)
+
+  const trimmedSlice = trimmed.slice(trimmedStart, trimmedStart + trimmedLen)
+  const endLineOffset = (trimmedSlice.match(/\n/g) ?? []).length
+  const lastNl = trimmedSlice.lastIndexOf('\n')
+  const endCol = lastNl === -1 ? startCol + trimmedLen : trimmedSlice.length - lastNl - 1
+
+  // 在原文中找到对应行的起始位置
+  const origLines = original.split('\n')
+  if (startLine >= origLines.length) return null
+  const startLineBegin = origLines.slice(0, startLine).reduce((s, l) => s + l.length + 1, 0)
+
+  // trimmed 的每行去掉了前导/尾随空白，需要在原行中找到对应字符位置
+  const origStartLine = origLines[startLine]
+  const trimmedStartLine = trimmed.split('\n')[startLine] ?? ''
+  // 找到 trimmedStartLine 在原行中的位置（容错：从行头开始）
+  const origStartLineIdx = origStartLine.indexOf(trimmedStartLine.slice(0, Math.max(1, trimmedStartLine.length / 2) | 0))
+  const startInLine = origStartLineIdx >= 0 ? origStartLineIdx + startCol : startCol
+  const startIndex = startLineBegin + startInLine
+
+  // 终点行类似处理
+  const endLine = startLine + endLineOffset
+  if (endLine >= origLines.length) return null
+  const endLineBegin = origLines.slice(0, endLine).reduce((s, l) => s + l.length + 1, 0)
+  const origEndLine = origLines[endLine]
+  const trimmedEndLine = trimmed.split('\n')[endLine] ?? ''
+  const origEndLineIdx = origEndLine.indexOf(trimmedEndLine.slice(0, Math.max(1, trimmedEndLine.length / 2) | 0))
+  const endInLine = origEndLineIdx >= 0 ? origEndLineIdx + endCol : endCol
+  const endIndex = endLineBegin + endInLine
+
+  if (startIndex >= endIndex || endIndex > original.length) return null
+  return { startIndex, endIndex }
+}
+
+/** 找出文件中与 oldString 最相似的 N 行（用于错误提示） */
+function findMostSimilarLines(
+  content: string,
+  oldString: string,
+  topN: number,
+): Array<{ line: number; text: string; score: number }> {
+  const lines = content.split('\n')
+  // 取 oldString 的首行作为指纹
+  const fingerprint = oldString.split('\n')[0].trim().slice(0, 50)
+  if (fingerprint.length < 4) return []  // 太短不做相似度判断
+
+  const candidates: Array<{ line: number; text: string; score: number }> = []
+  for (let i = 0; i < lines.length; i++) {
+    const score = similarity(lines[i].trim(), fingerprint)
+    if (score > 0.5) {
+      candidates.push({ line: i + 1, text: lines[i], score })
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score)
+  return candidates.slice(0, topN)
+}
+
+/** 简单相似度：基于公共子串长度 / 长字符串长度 */
+function similarity(a: string, b: string): number {
+  if (!a || !b) return 0
+  const longer = a.length >= b.length ? a : b
+  const shorter = a.length >= b.length ? b : a
+  if (longer.length === 0) return 1
+  // 滑动窗口找最长公共子串
+  let best = 0
+  for (let i = 0; i + shorter.length <= longer.length; i++) {
+    let match = 0
+    for (let j = 0; j < shorter.length; j++) {
+      if (longer[i + j] === shorter[j]) match++
+    }
+    if (match > best) best = match
+  }
+  return best / longer.length
+}
+
+interface ListFilesArgs { path: string; pattern?: string; depth?: number; show_size?: boolean }
+
+const LIST_FILES_MAX_ITEMS = 200
+const NOISY_DIRS_FOR_LIST = new Set([
+  'node_modules', '.git', '.svn', '.hg',
+  'dist', 'build', 'out', 'target',
+  '.next', '.nuxt', '.svelte-kit',
+  'coverage', '.nyc_output',
+  '.venv', 'venv', '__pycache__',
+  '.cache', '.parcel-cache', '.turbo', 'release',
+])
 
 async function toolListFiles(args: unknown): Promise<string> {
-  const { path: p, pattern } = pickArgs<ListFilesArgs>(args, ['path'])
+  const { path: p, pattern, depth: rawDepth, show_size } = pickArgs<ListFilesArgs>(args, ['path'])
   const target = expandHome(p)
   assertSafePath(target)
-  const entries = await fs.readdir(target, { withFileTypes: true })
-  const regex = pattern ? globToRegex(pattern) : null
-  const items = entries
-    .filter(e => (regex ? regex.test(e.name) : true))
-    .map(e => `${e.isDirectory() ? '[DIR] ' : '[FILE]'} ${e.name}`)
 
-  if (items.length === 0) return `${target} 内无匹配项${pattern ? `（pattern=${pattern}）` : ''}`
-  return [`[目录: ${target}] 共 ${items.length} 项`, ...items].join('\n')
+  const depth = clamp(rawDepth ?? 1, 1, 5)
+  const regex = pattern ? globToRegex(pattern) : null
+  const items: string[] = []
+
+  // 递归遍历到指定深度；噪音目录直接跳过（保留目录名但不展开）
+  async function visit(dir: string, currentDepth: number): Promise<void> {
+    if (items.length >= LIST_FILES_MAX_ITEMS) return
+    let entries: fsSync.Dirent[]
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    // 排序：目录在前，文件在后；同类按字母
+    entries.sort((a, b) => {
+      const aDir = a.isDirectory() ? 0 : 1
+      const bDir = b.isDirectory() ? 0 : 1
+      return aDir !== bDir ? aDir - bDir : a.name.localeCompare(b.name)
+    })
+
+    for (const entry of entries) {
+      if (items.length >= LIST_FILES_MAX_ITEMS) return
+      const relIndent = '  '.repeat(currentDepth - 1)
+      if (entry.isDirectory()) {
+        const isNoisy = NOISY_DIRS_FOR_LIST.has(entry.name)
+        if (isNoisy && depth > 1) {
+          items.push(`${relIndent}[DIR]  ${entry.name}/  (已折叠，跳过递归)`)
+          continue
+        }
+        // pattern 仅对文件名生效；深层目录始终列出
+        items.push(`${relIndent}[DIR]  ${entry.name}/`)
+        if (currentDepth < depth) {
+          await visit(path.join(dir, entry.name), currentDepth + 1)
+        }
+      } else if (entry.isFile()) {
+        if (regex && !regex.test(entry.name)) continue
+        let sizeInfo = ''
+        if (show_size) {
+          try {
+            const stat = await fs.stat(path.join(dir, entry.name))
+            sizeInfo = `  (${formatFileSize(stat.size)})`
+          } catch { /* ignore */ }
+        }
+        items.push(`${relIndent}[FILE] ${entry.name}${sizeInfo}`)
+      }
+    }
+  }
+
+  await visit(target, 1)
+
+  if (items.length === 0) {
+    return `${target} 内无匹配项${pattern ? `（pattern=${pattern}）` : ''}`
+  }
+  const header = `[目录: ${target}] 共 ${items.length} 项，递归深度 ${depth}${items.length >= LIST_FILES_MAX_ITEMS ? `（已截断到 ${LIST_FILES_MAX_ITEMS}）` : ''}`
+  return [header, ...items].join('\n')
+}
+
+/** 友好的文件大小展示 */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(2)} GB`
 }
 
 interface SearchFilesArgs { path: string; query: string; file_pattern?: string; max_results?: number }
@@ -302,6 +523,105 @@ async function toolSearchFiles(args: unknown): Promise<string> {
 
   if (matched.length === 0) return `未找到包含 "${query}" 的文件`
   return [`[搜索: ${query}] 命中 ${matched.length} 个文件${matched.length >= max_results ? '（已截断）' : ''}`, ...matched].join('\n')
+}
+
+// ── grep_code / glob_files：编程任务专用搜索工具 ─────────────────
+// 实现在 ./code-search.ts；此处仅做参数透传和审计记录
+
+interface GrepCodeArgs {
+  pattern: string
+  path?: string
+  include?: string
+  context_lines?: number
+  case_insensitive?: boolean
+  max_results?: number
+  output_mode?: 'content' | 'files_with_matches' | 'count'
+}
+
+async function toolGrepCode(args: unknown): Promise<string> {
+  const parsed = pickArgs<GrepCodeArgs>(args, ['pattern'])
+  recordAgentAudit({
+    tool: 'grep_code',
+    action: 'grep',
+    target: parsed.path || process.cwd(),
+    summary: `pattern=${preview(parsed.pattern, 80)}${parsed.include ? `, include=${parsed.include}` : ''}`,
+  })
+  return await grepCode(parsed)
+}
+
+interface GlobFilesArgs {
+  pattern: string
+  path?: string
+  max_results?: number
+}
+
+async function toolGlobFiles(args: unknown): Promise<string> {
+  const parsed = pickArgs<GlobFilesArgs>(args, ['pattern'])
+  recordAgentAudit({
+    tool: 'glob_files',
+    action: 'glob',
+    target: parsed.path || process.cwd(),
+    summary: `pattern=${preview(parsed.pattern, 80)}`,
+  })
+  return await globFiles(parsed)
+}
+
+// ── Git 只读工具 ──────────────────────────────────────────
+
+interface GitStatusArgs { work_dir?: string }
+async function toolGitStatus(args: unknown): Promise<string> {
+  const parsed = pickArgs<GitStatusArgs>(args, [])
+  return await gitStatus(parsed)
+}
+
+interface GitDiffArgs {
+  work_dir?: string
+  paths?: string[]
+  cached?: boolean
+  name_only?: boolean
+  ref?: string
+}
+async function toolGitDiff(args: unknown): Promise<string> {
+  const parsed = pickArgs<GitDiffArgs>(args, [])
+  return await gitDiff(parsed)
+}
+
+interface GitLogArgs {
+  work_dir?: string
+  limit?: number
+  file?: string
+  with_stat?: boolean
+  ref?: string
+}
+async function toolGitLog(args: unknown): Promise<string> {
+  const parsed = pickArgs<GitLogArgs>(args, [])
+  return await gitLog(parsed)
+}
+
+// ── Web 网络工具 ──────────────────────────────────────────
+
+interface WebFetchArgs { url: string; max_chars?: number }
+async function toolWebFetch(args: unknown): Promise<string> {
+  const parsed = pickArgs<WebFetchArgs>(args, ['url'])
+  recordAgentAudit({
+    tool: 'web_fetch',
+    action: 'fetch',
+    target: parsed.url,
+    summary: `抓取 URL`,
+  })
+  return await webFetch(parsed)
+}
+
+interface WebSearchArgs { query: string; max_results?: number }
+async function toolWebSearch(args: unknown): Promise<string> {
+  const parsed = pickArgs<WebSearchArgs>(args, ['query'])
+  recordAgentAudit({
+    tool: 'web_search',
+    action: 'search',
+    target: parsed.query,
+    summary: preview(parsed.query, 200),
+  })
+  return await webSearch(parsed)
 }
 
 // ═══════════════════════════════════════════════════════════════
