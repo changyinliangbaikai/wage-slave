@@ -56,6 +56,8 @@ function toMeta(s: AgentSession): AgentSessionMeta {
     updatedAt: s.updatedAt,
     messageCount: s.messageCount,
     preview: s.preview,
+    // 透传项目归属，方便按项目过滤
+    projectId: s.projectId,
   }
 }
 
@@ -74,7 +76,7 @@ export function deriveSessionMeta(messages: AgentMessage[]): { title: string; pr
 }
 
 /** 列出所有会话元数据（按 updatedAt 倒序） */
-export function listAgentSessions(): AgentSessionMeta[] {
+export function listAgentSessions(opts?: { projectId?: string }): AgentSessionMeta[] {
   ensureDir()
   const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json') && !f.endsWith('.tmp'))
   const metas: AgentSessionMeta[] = []
@@ -83,7 +85,13 @@ export function listAgentSessions(): AgentSessionMeta[] {
     if (!s || !s.id) continue
     metas.push(toMeta(s))
   }
-  return metas.sort((a, b) => b.updatedAt - a.updatedAt)
+  let result = metas
+  if (opts?.projectId) {
+    // 旧会话可能没有 projectId，按 'default' 处理与默认项目归集
+    const target = opts.projectId
+    result = metas.filter(m => (m.projectId ?? 'default') === target)
+  }
+  return result.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /** 读取一个完整会话 */
@@ -106,6 +114,8 @@ export function saveAgentSession(session: AgentSession): AgentSessionMeta {
     messageCount: session.messages?.length ?? 0,
     createdAt: session.createdAt || now,
     updatedAt: now,
+    // 写盘时把 projectId 持久化，未指定时缺省 'default'
+    projectId: session.projectId ?? 'default',
   }
   atomicWrite(sessionFile(normalized.id), normalized)
   return toMeta(normalized)
@@ -139,4 +149,28 @@ export function renameAgentSession(id: string, title: string): boolean {
 /** 生成新会话 id */
 export function genAgentSessionId(): string {
   return `agent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+/**
+ * 把指定项目下的所有会话 projectId 重置为 'default'
+ * 用途：删除项目时调用，保留会话内容但归集到默认项目
+ * 返回被重置的会话数量
+ */
+export function reassignSessionsToDefault(projectId: string): number {
+  if (!projectId || projectId === 'default') return 0
+  ensureDir()
+  const files = fs.readdirSync(SESSIONS_DIR).filter(f => f.endsWith('.json') && !f.endsWith('.tmp'))
+  let count = 0
+  for (const f of files) {
+    const fpath = path.join(SESSIONS_DIR, f)
+    const s = readJSON<AgentSession | null>(fpath, null)
+    if (!s || s.projectId !== projectId) continue
+    const next: AgentSession = { ...s, projectId: 'default', updatedAt: Date.now() }
+    atomicWrite(fpath, next)
+    count++
+  }
+  if (count > 0) {
+    log.info(`[AgentSession] 已把项目 ${projectId} 下 ${count} 个会话归集到 default`)
+  }
+  return count
 }

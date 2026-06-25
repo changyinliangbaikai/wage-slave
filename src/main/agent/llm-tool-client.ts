@@ -150,7 +150,13 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
     stream_options: { include_usage: true }
   }
 
-  log.info(`[AgentLLM] 发起请求 model=${model} messages=${params.messages.length} tools=${params.tools.length}`)
+  // 可选的 reasoning_effort：仅对支持的模型生效，留空时不发送
+  const effort = config.agent_reasoning_effort
+  if (effort === 'low' || effort === 'medium' || effort === 'high') {
+    body.reasoning_effort = effort
+  }
+
+  log.info(`[AgentLLM] 发起请求 model=${model} messages=${params.messages.length} tools=${params.tools.length} effort=${effort || '-'}`)
 
   let res: Response
   try {
@@ -272,9 +278,19 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
   }
 
   // 收尾：flush 残留 buffer
+  // 修复截断 Bug：ThinkSplitter 在 push() 期间为避免 </think> 被截断会保留最后 7-8 个字符在 buffer 中，
+  // 这些字符直到流结束 flush() 才会真正排出。早期实现忘记在流结束后补偿推送 onDelta，
+  // 导致前端在「无后续 onDelta」场景（紧随其后进入工具执行）丢失尾部 7-8 字。
   const tail = splitter.flush()
-  if (tail.reasoning) fullReasoning += tail.reasoning
-  if (tail.content) fullContent += tail.content
+  if (tail.reasoning || tail.content) {
+    if (tail.reasoning) fullReasoning += tail.reasoning
+    if (tail.content) fullContent += tail.content
+    // 补偿推送：把最后一波 tail 数据安全推送到前端，避免尾部字符截断丢失
+    if (params.onDelta) {
+      params.onDelta({ content: fullContent, reasoning: fullReasoning })
+      log.debug(`[AgentLLM] 流结束 flush tail reasoning=${tail.reasoning.length}字 content=${tail.content.length}字`)
+    }
+  }
 
   // 把 toolBuffer 转成有序的 toolCalls 数组（按 index 升序）
   const toolCalls: AgentToolCall[] = []
@@ -420,9 +436,15 @@ async function streamLLMReactFallback(params: StreamLLMParams, originalError: st
     throw e
   }
 
+  // ReAct 降级路径同步修复截断 Bug：flush 后补偿推送 onDelta
   const tail = splitter.flush()
-  if (tail.reasoning) fullReasoning += tail.reasoning
-  if (tail.content) fullContent += tail.content
+  if (tail.reasoning || tail.content) {
+    if (tail.reasoning) fullReasoning += tail.reasoning
+    if (tail.content) fullContent += tail.content
+    if (params.onDelta) {
+      params.onDelta({ content: stripFallbackToolTags(fullContent), reasoning: fullReasoning })
+    }
+  }
 
   log.info(`[AgentLLM] ReAct 原始响应内容（前500字）: ${fullContent.slice(0, 500)}`)
   const parsed = parseFallbackToolCalls(fullContent)

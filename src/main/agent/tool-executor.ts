@@ -59,11 +59,46 @@ const MAX_READ_FILE_LINES = 1_000
 const MAX_COMMAND_BUFFER = 4 * 1024 * 1024
 
 /**
+ * 工具执行上下文
+ * - signal：用户/超时中断
+ * - projectCwd：当前会话所属项目的绝对工作目录，作为相对路径解析基准；
+ *   未传时回退到 process.cwd()，保证旧调用方兼容
+ */
+export interface ToolExecContext {
+  signal?: AbortSignal
+  projectCwd?: string
+}
+
+/**
+ * 把相对路径基于项目根目录解析为绝对路径
+ * 优先展开 ~/ ，绝对路径直接返回；相对路径用 projectCwd 拼接，避免依赖 process.cwd()
+ */
+export function resolvePath(p: string, projectCwd?: string): string {
+  const expanded = expandHome(p)
+  if (path.isAbsolute(expanded)) return expanded
+  const base = projectCwd && projectCwd.length > 0 ? projectCwd : process.cwd()
+  return path.resolve(base, expanded)
+}
+
+/**
  * 工具执行入口
  * 接收 LLM 解析后的 toolCall，分发到对应实现，统一封装结果
+ *
+ * 第二参数兼容两种形态：
+ *  - AbortSignal（旧调用方）
+ *  - ToolExecContext（含 projectCwd，新调用方）
  */
-export async function executeTool(call: AgentToolCall, signal?: AbortSignal): Promise<AgentToolResult> {
+export async function executeTool(
+  call: AgentToolCall,
+  signalOrCtx?: AbortSignal | ToolExecContext,
+): Promise<AgentToolResult> {
   const startTime = Date.now()
+  // 兼容旧签名：第二参数若是 AbortSignal 直接当 signal 用
+  const ctx: ToolExecContext = signalOrCtx && 'aborted' in signalOrCtx
+    ? { signal: signalOrCtx as AbortSignal }
+    : ((signalOrCtx ?? {}) as ToolExecContext)
+  const signal = ctx.signal
+  const cwd = ctx.projectCwd
 
   try {
     log.info(`[AgentTool] 执行: ${call.name}`, JSON.stringify(call.arguments).slice(0, 200))
@@ -77,22 +112,22 @@ export async function executeTool(call: AgentToolCall, signal?: AbortSignal): Pr
     let raw: string
     switch (call.name) {
       // 文件操作
-      case 'read_file':    raw = await toolReadFile(call.arguments); break
-      case 'write_file':   raw = await toolWriteFile(call.arguments); break
-      case 'edit_file':    raw = await toolEditFile(call.arguments); break
-      case 'list_files':   raw = await toolListFiles(call.arguments); break
-      case 'search_files': raw = await toolSearchFiles(call.arguments); break
-      case 'grep_code':    raw = await toolGrepCode(call.arguments); break
-      case 'glob_files':   raw = await toolGlobFiles(call.arguments); break
+      case 'read_file':    raw = await toolReadFile(call.arguments, cwd); break
+      case 'write_file':   raw = await toolWriteFile(call.arguments, cwd); break
+      case 'edit_file':    raw = await toolEditFile(call.arguments, cwd); break
+      case 'list_files':   raw = await toolListFiles(call.arguments, cwd); break
+      case 'search_files': raw = await toolSearchFiles(call.arguments, cwd); break
+      case 'grep_code':    raw = await toolGrepCode(call.arguments, cwd); break
+      case 'glob_files':   raw = await toolGlobFiles(call.arguments, cwd); break
       // Git 只读
-      case 'git_status':   raw = await toolGitStatus(call.arguments); break
-      case 'git_diff':     raw = await toolGitDiff(call.arguments); break
-      case 'git_log':      raw = await toolGitLog(call.arguments); break
+      case 'git_status':   raw = await toolGitStatus(call.arguments, cwd); break
+      case 'git_diff':     raw = await toolGitDiff(call.arguments, cwd); break
+      case 'git_log':      raw = await toolGitLog(call.arguments, cwd); break
       // Web 网络工具
       case 'web_fetch':    raw = await toolWebFetch(call.arguments); break
       case 'web_search':   raw = await toolWebSearch(call.arguments); break
       // 命令执行
-      case 'run_command':  raw = await toolRunCommand(call.arguments, signal); break
+      case 'run_command':  raw = await toolRunCommand(call.arguments, signal, cwd); break
       // 小牛马数据操作
       case 'get_today_log':  raw = await toolGetTodayLog(); break
       case 'get_todos':      raw = await toolGetTodos(); break
@@ -114,7 +149,7 @@ export async function executeTool(call: AgentToolCall, signal?: AbortSignal): Pr
       case 'skill_toggle': raw = await toolSkillToggle(call.arguments as { id: string; enabled: boolean }); break
       case 'skill_delete': raw = await toolSkillDelete(call.arguments as { id: string }); break
       // 系统操作
-      case 'open_file':         raw = await toolOpenFile(call.arguments); break
+      case 'open_file':         raw = await toolOpenFile(call.arguments, cwd); break
       case 'show_notification': raw = await toolShowNotification(call.arguments); break
       // 流程控制
       case 'wait': raw = await toolWait(call.arguments); break
@@ -160,11 +195,12 @@ export async function executeTool(call: AgentToolCall, signal?: AbortSignal): Pr
 
 interface ReadFileArgs { path: string; offset?: number; max_lines?: number }
 
-async function toolReadFile(args: unknown): Promise<string> {
+async function toolReadFile(args: unknown, cwd?: string): Promise<string> {
   const { path: p, offset = 0, max_lines } = pickArgs<ReadFileArgs>(args, ['path'])
-  const target = expandHome(p)
+  // 相对路径以当前会话所属项目根 cwd 解析，避免依赖 process.cwd（多会话并发不安全）
+  const target = resolvePath(p, cwd)
   // 读取也走白名单（避免读取系统敏感文件如 /etc/passwd）
-  assertSafePath(target)
+  assertSafePath(target, cwd)
   const safeOffset = Math.max(0, Math.floor(offset))
   const requestedLines = typeof max_lines === 'number' && max_lines > 0
     ? Math.floor(max_lines)
@@ -204,10 +240,10 @@ async function toolReadFile(args: unknown): Promise<string> {
 
 interface WriteFileArgs { path: string; content: string }
 
-async function toolWriteFile(args: unknown): Promise<string> {
+async function toolWriteFile(args: unknown, cwd?: string): Promise<string> {
   const { path: p, content } = pickArgs<WriteFileArgs>(args, ['path', 'content'])
-  const target = expandHome(p)
-  assertSafePath(target)
+  const target = resolvePath(p, cwd)
+  assertSafePath(target, cwd)
   await fs.mkdir(path.dirname(target), { recursive: true })
   await fs.writeFile(target, content, 'utf-8')
   recordAgentAudit({
@@ -221,14 +257,14 @@ async function toolWriteFile(args: unknown): Promise<string> {
 
 interface EditFileArgs { path: string; old_string: string; new_string: string; replace_all?: boolean }
 
-async function toolEditFile(args: unknown): Promise<string> {
+async function toolEditFile(args: unknown, cwd?: string): Promise<string> {
   const { path: p, old_string, new_string, replace_all } = pickArgs<EditFileArgs>(args, ['path', 'old_string', 'new_string'])
   if (old_string === new_string) {
     throw new Error('old_string 与 new_string 完全一致，无需替换')
   }
 
-  const target = expandHome(p)
-  assertSafePath(target)
+  const target = resolvePath(p, cwd)
+  assertSafePath(target, cwd)
   const content = await fs.readFile(target, 'utf-8')
 
   if (replace_all) {
@@ -422,10 +458,10 @@ const NOISY_DIRS_FOR_LIST = new Set([
   '.cache', '.parcel-cache', '.turbo', 'release',
 ])
 
-async function toolListFiles(args: unknown): Promise<string> {
+async function toolListFiles(args: unknown, cwd?: string): Promise<string> {
   const { path: p, pattern, depth: rawDepth, show_size } = pickArgs<ListFilesArgs>(args, ['path'])
-  const target = expandHome(p)
-  assertSafePath(target)
+  const target = resolvePath(p, cwd)
+  assertSafePath(target, cwd)
 
   const depth = clamp(rawDepth ?? 1, 1, 5)
   const regex = pattern ? globToRegex(pattern) : null
@@ -494,10 +530,10 @@ function formatFileSize(bytes: number): string {
 
 interface SearchFilesArgs { path: string; query: string; file_pattern?: string; max_results?: number }
 
-async function toolSearchFiles(args: unknown): Promise<string> {
+async function toolSearchFiles(args: unknown, cwd?: string): Promise<string> {
   const { path: p, query, file_pattern, max_results = 50 } = pickArgs<SearchFilesArgs>(args, ['path', 'query'])
-  const target = expandHome(p)
-  assertSafePath(target)
+  const target = resolvePath(p, cwd)
+  assertSafePath(target, cwd)
 
   const fileRegex = file_pattern ? globToRegex(file_pattern) : null
   const queryLower = query.toLowerCase()
@@ -538,15 +574,17 @@ interface GrepCodeArgs {
   output_mode?: 'content' | 'files_with_matches' | 'count'
 }
 
-async function toolGrepCode(args: unknown): Promise<string> {
+async function toolGrepCode(args: unknown, cwd?: string): Promise<string> {
   const parsed = pickArgs<GrepCodeArgs>(args, ['pattern'])
+  // 把项目 cwd 注入参数：参数缺省时使用项目根作为搜索起点
+  const merged = { ...parsed, path: parsed.path ?? cwd }
   recordAgentAudit({
     tool: 'grep_code',
     action: 'grep',
-    target: parsed.path || process.cwd(),
+    target: merged.path || process.cwd(),
     summary: `pattern=${preview(parsed.pattern, 80)}${parsed.include ? `, include=${parsed.include}` : ''}`,
   })
-  return await grepCode(parsed)
+  return await grepCode(merged)
 }
 
 interface GlobFilesArgs {
@@ -555,23 +593,24 @@ interface GlobFilesArgs {
   max_results?: number
 }
 
-async function toolGlobFiles(args: unknown): Promise<string> {
+async function toolGlobFiles(args: unknown, cwd?: string): Promise<string> {
   const parsed = pickArgs<GlobFilesArgs>(args, ['pattern'])
+  const merged = { ...parsed, path: parsed.path ?? cwd }
   recordAgentAudit({
     tool: 'glob_files',
     action: 'glob',
-    target: parsed.path || process.cwd(),
+    target: merged.path || process.cwd(),
     summary: `pattern=${preview(parsed.pattern, 80)}`,
   })
-  return await globFiles(parsed)
+  return await globFiles(merged)
 }
 
 // ── Git 只读工具 ──────────────────────────────────────────
 
 interface GitStatusArgs { work_dir?: string }
-async function toolGitStatus(args: unknown): Promise<string> {
+async function toolGitStatus(args: unknown, cwd?: string): Promise<string> {
   const parsed = pickArgs<GitStatusArgs>(args, [])
-  return await gitStatus(parsed)
+  return await gitStatus({ ...parsed, work_dir: parsed.work_dir ?? cwd })
 }
 
 interface GitDiffArgs {
@@ -581,9 +620,9 @@ interface GitDiffArgs {
   name_only?: boolean
   ref?: string
 }
-async function toolGitDiff(args: unknown): Promise<string> {
+async function toolGitDiff(args: unknown, cwd?: string): Promise<string> {
   const parsed = pickArgs<GitDiffArgs>(args, [])
-  return await gitDiff(parsed)
+  return await gitDiff({ ...parsed, work_dir: parsed.work_dir ?? cwd })
 }
 
 interface GitLogArgs {
@@ -593,9 +632,9 @@ interface GitLogArgs {
   with_stat?: boolean
   ref?: string
 }
-async function toolGitLog(args: unknown): Promise<string> {
+async function toolGitLog(args: unknown, cwd?: string): Promise<string> {
   const parsed = pickArgs<GitLogArgs>(args, [])
-  return await gitLog(parsed)
+  return await gitLog({ ...parsed, work_dir: parsed.work_dir ?? cwd })
 }
 
 // ── Web 网络工具 ──────────────────────────────────────────
@@ -630,7 +669,7 @@ async function toolWebSearch(args: unknown): Promise<string> {
 
 interface RunCommandArgs { command: string; work_dir?: string; timeout_ms?: number }
 
-async function toolRunCommand(args: unknown, signal?: AbortSignal): Promise<string> {
+async function toolRunCommand(args: unknown, signal?: AbortSignal, projectCwd?: string): Promise<string> {
   const { command, work_dir, timeout_ms } = pickArgs<RunCommandArgs>(args, ['command'])
 
   // 第一道防线：黑名单（命令边界正则）
@@ -639,8 +678,10 @@ async function toolRunCommand(args: unknown, signal?: AbortSignal): Promise<stri
     console.warn(`[Agent.tool] run_command 被黑名单拦截: ${command} | 原因: ${check.reason}`)
     throw new Error(`命令被安全策略拒绝：${check.reason ?? '未知原因'}。命令: "${preview(command, 80)}"`)
   }
-  if (work_dir) {
-    assertSafePath(expandHome(work_dir))
+  // 命令工作目录：优先用工具参数 work_dir；否则回退到项目根 projectCwd
+  const targetWorkDir = work_dir ? resolvePath(work_dir, projectCwd) : projectCwd
+  if (targetWorkDir) {
+    assertSafePath(targetWorkDir, projectCwd)
   }
 
   const timeout = clamp(timeout_ms ?? 30_000, 1_000, 120_000)
@@ -650,13 +691,13 @@ async function toolRunCommand(args: unknown, signal?: AbortSignal): Promise<stri
   // 这一步把决策权交给用户，杜绝 Agent 误删/误改文件的风险
   const userAllowed = await confirmCommandWithUser({
     command,
-    workDir: work_dir,
+    workDir: targetWorkDir,
     timeoutMs: timeout,
   })
   if (!userAllowed) {
     throw new Error(`用户拒绝执行命令: "${preview(command, 80)}"`)
   }
-  const cwd = work_dir ? expandHome(work_dir) : undefined
+  const cwd = targetWorkDir
   recordAgentAudit({
     tool: 'run_command',
     action: 'run_command',
@@ -1222,10 +1263,10 @@ async function toolSchedulerToggleTask(args: unknown): Promise<string> {
 
 interface OpenFileArgs { path: string }
 
-async function toolOpenFile(args: unknown): Promise<string> {
+async function toolOpenFile(args: unknown, cwd?: string): Promise<string> {
   const { path: p } = pickArgs<OpenFileArgs>(args, ['path'])
-  const target = expandHome(p)
-  assertSafePath(target)
+  const target = resolvePath(p, cwd)
+  assertSafePath(target, cwd)
   if (!fsSync.existsSync(target)) throw new Error(`文件不存在: ${target}`)
   const err = await shell.openPath(target)
   if (err) throw new Error(`打开失败: ${err}`)

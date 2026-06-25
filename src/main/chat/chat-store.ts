@@ -63,6 +63,8 @@ function agentMsgToChat(m: AgentMessage): ChatMessage {
     tool_calls: m.tool_calls,
     tool_call_id: m.tool_call_id,
     tool_name: m.tool_name,
+    // 保留 Agent 写入的 metadata（含 token 使用量、迭代轮次等），用于前端继续显示
+    metadata: m.metadata,
     createdAt: m.createdAt,
   }
 }
@@ -90,6 +92,8 @@ function agentSessionToChat(s: AgentSession): ChatSession {
     messageCount: s.messageCount,
     preview: s.preview,
     mode: 'agent',
+    // 透传项目归属（多项目过滤需要）
+    projectId: s.projectId,
     messages: (s.messages ?? []).map(agentMsgToChat),
     config: { mode: 'agent' },
     stats: s.stats
@@ -125,17 +129,34 @@ function chatMsgToAgent(m: ChatMessage): AgentMessage {
     tool_calls: m.tool_calls,
     tool_call_id: m.tool_call_id,
     tool_name: m.tool_name,
+    // 写回 Agent 存储时保留 token 等 metadata，避免会话切换后丢失上下文占比
+    metadata: m.metadata,
     createdAt: m.createdAt,
   }
 }
 
 // ── 公共 API ────────────────────────────────────
 
-/** 列出全部会话（合并两套存储，按 updatedAt 倒序） */
-export function listSessions(): ChatSessionMeta[] {
-  const chat: ChatSessionMeta[] = aiStore.listSessions().map(m => ({ ...m, mode: 'chat' as const }))
-  const agent: ChatSessionMeta[] = agentStore.listAgentSessions().map(m => ({ ...m, mode: 'agent' as const }))
-  return [...chat, ...agent].sort((a, b) => b.updatedAt - a.updatedAt)
+/**
+ * 列出全部会话（合并两套存储，按 updatedAt 倒序）
+ * 支持按 projectId 过滤：旧的 ai-chats / 缺省 projectId 的 agent 会话视为 'default' 项目
+ */
+export function listSessions(opts?: { projectId?: string }): ChatSessionMeta[] {
+  // 旧 ai-chats 全部归属 'default' 项目
+  const chat: ChatSessionMeta[] = aiStore.listSessions().map(m => ({
+    ...m,
+    mode: 'chat' as const,
+    projectId: 'default',
+  }))
+  const agent: ChatSessionMeta[] = agentStore
+    .listAgentSessions(opts?.projectId ? { projectId: opts.projectId } : undefined)
+    .map(m => ({ ...m, mode: 'agent' as const, projectId: m.projectId ?? 'default' }))
+
+  const merged = [...chat, ...agent]
+  const filtered = opts?.projectId
+    ? merged.filter(m => (m.projectId ?? 'default') === opts.projectId)
+    : merged
+  return filtered.sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /** 读取一条完整会话（按 id 前缀路由） */
@@ -159,6 +180,8 @@ export function saveSession(session: ChatSession): ChatSessionMeta {
       messageCount: session.messages.length,
       preview: session.preview,
       messages: session.messages.map(chatMsgToAgent),
+      // 把项目归属一并写盘
+      projectId: session.projectId ?? 'default',
       stats: {
         iterations: session.stats?.totalIterations ?? 0,
         toolCalls: session.stats?.totalToolCalls ?? 0,
@@ -166,7 +189,7 @@ export function saveSession(session: ChatSession): ChatSessionMeta {
       },
     }
     const meta = agentStore.saveAgentSession(agentSession)
-    return { ...meta, mode: 'agent' }
+    return { ...meta, mode: 'agent', projectId: agentSession.projectId }
   }
 
   const aiSession: AIChatSession = {

@@ -15,6 +15,7 @@ import { app, BrowserWindow, dialog } from 'electron'
 import * as os from 'os'
 import * as path from 'path'
 import { getConfig } from '../store'
+import { listProjects } from '../chat/project-store'
 
 /**
  * 获取 Agent 允许访问的路径白名单（绝对路径前缀）
@@ -55,7 +56,15 @@ export function getDefaultAllowedPaths(): string[] {
 
 export function getAllowedPaths(): string[] {
   const custom = getConfig().agent_allowed_paths_extra ?? []
-  return normalizeAllowedPaths([...getDefaultAllowedPaths(), ...custom])
+  // 动态白名单：把 projects.json 中所有注册项目路径并入，避免 Agent 读取自定义项目时被白名单误拦
+  // 即使 projects.json 还未初始化也不抛错（兜底空数组）
+  let projectPaths: string[] = []
+  try {
+    projectPaths = listProjects().map(p => p.path)
+  } catch {
+    projectPaths = []
+  }
+  return normalizeAllowedPaths([...getDefaultAllowedPaths(), ...custom, ...projectPaths])
 }
 
 function normalizeAllowedPaths(paths: string[]): string[] {
@@ -69,15 +78,20 @@ function normalizeAllowedPaths(paths: string[]): string[] {
 /**
  * 校验目标路径是否在白名单内
  * 不在白名单内的路径会抛出错误，由工具执行器捕获并返回给 LLM
+ *
+ * @param targetPath 待检验的路径（可能含 ~ 或相对路径）
+ * @param projectCwd 当前会话所属项目根，用于解析相对路径；未传则回退 process.cwd()
  */
-export function assertSafePath(targetPath: string): void {
+export function assertSafePath(targetPath: string, projectCwd?: string): void {
   if (!targetPath || typeof targetPath !== 'string') {
     throw new Error('路径不能为空')
   }
 
   // 展开 ~ 起始的路径（部分模型会输出这种相对路径）
   const expanded = expandHome(targetPath)
-  const resolved = path.resolve(expanded)
+  // 相对路径基于项目根目录解析，避免依赖全局 process.cwd（多会话并发不安全）
+  const base = projectCwd && projectCwd.length > 0 ? projectCwd : process.cwd()
+  const resolved = path.isAbsolute(expanded) ? expanded : path.resolve(base, expanded)
 
   const allowedPrefixes = getAllowedPaths()
   const isAllowed = allowedPrefixes.some(prefix => isInside(resolved, prefix))

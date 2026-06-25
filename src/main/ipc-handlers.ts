@@ -10,9 +10,14 @@ import { registerToolsIPC } from './ipc/tools'
 import { registerSchedulerIPC } from './ipc/scheduler'
 import { registerSkillIPC } from './ipc/skills'
 import { registerAgentCronIPC } from './ipc/agent-cron'
+import { registerProjectIPC } from './ipc/project'
 import { registerChatIPC } from './ipc-handlers-chat'
+import { initProjectStore } from './chat/project-store'
 
 export function registerIPCHandlers(): void {
+  // 0. 项目（Project）数据初始化：保证默认项目存在 + 目录就绪
+  initProjectStore()
+
   // 1. 配置参数与安全密钥服务
   registerConfigIPC()
 
@@ -34,6 +39,9 @@ export function registerIPCHandlers(): void {
   // 7. 定时 Agent (Agent Cron) 独立控制面 (在其内部级联挂载 registerAttachmentIPC)
   registerAgentCronIPC()
 
-  // 8. 统一对话管理中心 (整合了简单聊天与 Agent 回复)
+  // 8. 项目（多工作区）管理
+  registerProjectIPC()
+
+  // 9. 统一对话管理中心 (整合了简单聊天与 Agent 回复)
   registerChatIPC()
 }

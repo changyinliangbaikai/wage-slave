@@ -196,6 +196,20 @@ export const IPC = {
   CHAT_DONE:            'main:chat-done',                // 完成（含统计）
   CHAT_ERROR:           'main:chat-error',               // 出错
   CHAT_FOCUS_INPUT:     'main:chat-focus-input',         // 窗口被重新唤起时聚焦输入框
+
+  // ── 项目（Project）管理 ───────────────────────
+  // renderer → main
+  PROJECT_LIST:         'renderer:project-list',         // 列出全部项目
+  PROJECT_CREATE:       'renderer:project-create',       // 新建项目（关联现有目录或新建目录）
+  PROJECT_RENAME:       'renderer:project-rename',       // 重命名项目
+  PROJECT_DELETE:       'renderer:project-delete',       // 删除项目（仅索引）
+  PROJECT_PICK_DIR:     'renderer:project-pick-dir',     // 打开目录选择器
+  // main → renderer
+  PROJECT_CHANGED:      'main:project-changed',          // 项目列表变化，通知 UI 刷新
+
+  // ── Slash 命令（状态控制型） ───────────────────
+  // renderer → main
+  CHAT_COMPACT_SESSION: 'renderer:chat-compact-session', // 永久压缩当前会话历史
 } as const
 
 export type IPCChannel = typeof IPC[keyof typeof IPC]

@@ -65,6 +65,10 @@ export interface AgentRunOptions {
   timeoutMs?: number
   /** 流式回调 */
   callbacks: AgentCallbacks
+  /** 当前会话归属的项目 id（用于路径白名单与 cwd 注入） */
+  projectId?: string
+  /** 当前项目的绝对工作目录（贯穿整个执行，作为相对路径解析基准） */
+  projectCwd?: string
 }
 
 /**
@@ -81,6 +85,18 @@ export class AgentOrchestrator {
   private running = false
   /** 累计统计 */
   private stats = { iterations: 0, toolCalls: 0, totalDurationMs: 0 }
+  /** 最近一轮 LLM 调用的 Token 使用量（用于 onDone 回传给前端显示上下文占比） */
+  private latestTokenUsage: {
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
+    maxTokens: number
+    iteration?: number
+  } | null = null
+  /** 当前会话归属的项目 id（默认 'default'） */
+  private projectId: string = 'default'
+  /** 当前项目的工作目录（绝对路径，作为相对路径解析基准） */
+  private projectCwd: string = process.cwd()
 
   constructor(sessionId: string) {
     this.sessionId = sessionId
@@ -100,6 +116,11 @@ export class AgentOrchestrator {
   /** 执行一次任务 */
   async run(opts: AgentRunOptions): Promise<void> {
     if (this.running) throw new Error('Agent 正在运行，请先停止')
+
+    // 锁定本次执行所属的项目上下文（projectId + projectCwd），贯穿全部工具调用
+    if (opts.projectId) this.projectId = opts.projectId
+    if (opts.projectCwd) this.projectCwd = opts.projectCwd
+    log.info(`[Agent] 项目上下文 sessionId=${this.sessionId} projectId=${this.projectId} cwd=${this.projectCwd}`)
 
     const collector = new MemoryTraceCollector(this.sessionId)
     const curRunId = collector.getRunId()
@@ -167,7 +188,8 @@ export class AgentOrchestrator {
         attachments: opts.attachments,
         createdAt: Date.now(),
       }
-      ;(userMsg as any).dynamicContext = await buildDynamicContext(buildAgentContext())
+      // 上下文构建使用项目 cwd（绑定到当前会话的项目），避免依赖 process.cwd
+      ;(userMsg as any).dynamicContext = await buildDynamicContext(buildAgentContext(this.projectCwd))
       if (skillAddition) {
         ;(userMsg as any).skillAdditionText = `\n# === 激活技能 ===\n${skillAddition}`
       }
@@ -263,6 +285,8 @@ export class AgentOrchestrator {
 
         const promptTokens = result.usage?.prompt_tokens ?? 0
         const completionTokens = result.usage?.completion_tokens ?? 0
+        const totalTokens = result.usage?.total_tokens ?? (promptTokens + completionTokens)
+        const maxTokens = inferModelMaxTokens()
         totalPromptTokens += promptTokens
         totalCompletionTokens += completionTokens
 
@@ -281,9 +305,29 @@ export class AgentOrchestrator {
                 arguments: JSON.stringify(tc.arguments),
               }))
             : undefined,
+          // 持久化本轮 Token 使用量，便于会话载入后前端继续显示占比
+          metadata: {
+            model: getConfig().agent_llm_model || getConfig().llm_model,
+            iteration: this.stats.iterations,
+            promptTokens,
+            completionTokens,
+            totalTokens,
+            maxTokens,
+          },
           createdAt: Date.now(),
         }
         this.history.push(assistantMsg)
+
+        // 用于回传给前端的 tokenUsage 对象
+        const tokenUsage = {
+          promptTokens,
+          completionTokens,
+          totalTokens,
+          maxTokens,
+          iteration: this.stats.iterations,
+        }
+        // 记录最近一轮 token 用量，用于 onDone 时返回
+        this.latestTokenUsage = tokenUsage
 
         // ── 检查是否遭遇截断 (Out of Token) ──
         if (result.finishReason === 'length') {
@@ -345,6 +389,8 @@ export class AgentOrchestrator {
             safetyLevel: getToolSafety(tc.name),
             arguments: tc.arguments,
           })),
+          // 把本轮 LLM 的 token 使用量随工具开始事件推给前端，便于实时刷新「上下文占比」UI
+          tokenUsage,
         })
 
         const toolResults = await this.executeAllTools(
@@ -406,6 +452,8 @@ export class AgentOrchestrator {
         content: finalContent,
         iterations: this.stats.iterations,
         stats: { ...this.stats },
+        // 把最近一轮（即最后一次 LLM 调用）的 token 使用量发给前端，作为 Context 显示来源
+        tokenUsage: this.latestTokenUsage ?? undefined,
         aborted: wasAborted,
         abortReason: wasAborted ? (timedOut ? 'timeout' : 'user') : undefined,
       })
@@ -423,6 +471,7 @@ export class AgentOrchestrator {
           content: finalContent || '(用户中断)',
           iterations: this.stats.iterations,
           stats: { ...this.stats },
+          tokenUsage: this.latestTokenUsage ?? undefined,
           aborted: true,
           abortReason: timedOut ? 'timeout' : 'user',
         })
@@ -570,7 +619,8 @@ export class AgentOrchestrator {
       }
     }, { spanId: toolSpanId, parentSpanId: llmSpanId })
 
-    const result = await executeTool(tc, signal)
+    // 把当前会话的项目工作目录注入工具上下文，作为相对路径解析基准
+    const result = await executeTool(tc, { signal, projectCwd: this.projectCwd })
 
     collector.record('tool.call', {
       toolCallId: tc.id,
@@ -605,7 +655,7 @@ export class AgentOrchestrator {
 
   /**
    * 把当前 history 写入会话存储
-   * 标题由首条 user 消息生成
+   * 标题由首条 user 消息生成；projectId 用于多项目过滤
    */
   private persistSession(latestContent: string): void {
     try {
@@ -621,6 +671,8 @@ export class AgentOrchestrator {
         messageCount: this.history.length,
         preview,
         messages: this.history,
+        // 记录会话所属项目，便于按项目过滤
+        projectId: this.projectId,
         stats: { ...this.stats },
       }
       saveAgentSession(session)
@@ -753,4 +805,24 @@ function normalizeTimeoutMs(value?: number): number | undefined {
 
 function isAbortError(e: unknown): boolean {
   return Boolean(e) && typeof e === 'object' && (e as { name?: string }).name === 'AbortError'
+}
+
+/**
+ * 推断当前模型的上下文窗口上限（用于前端显示占比）
+ * 与 context-compressor.ts 的模型识别策略保持一致
+ */
+export function inferModelMaxTokens(): number {
+  const cfg = getConfig()
+  const model = (cfg.agent_llm_model || cfg.llm_model || '').toLowerCase()
+  if (!model) return 32_768
+  if (model.includes('gpt-4o') || model.includes('gpt-4-turbo')) return 128_000
+  if (model.includes('gpt-5') || model.includes('o1') || model.includes('o3')) return 128_000
+  if (model.includes('claude-3') || model.includes('claude-4')) return 200_000
+  if (model.includes('claude')) return 200_000
+  if (model.includes('gemini')) return 128_000
+  if (model.includes('deepseek')) return 64_000
+  if (model.includes('qwen')) return 32_768
+  if (model.includes('moonshot') || model.includes('kimi')) return 128_000
+  if (model.includes('minimax')) return 245_760
+  return 32_768
 }

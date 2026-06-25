@@ -27,32 +27,69 @@
   background: var(--agent-panel);
 }
 
-/* 模式切换分段控件 */
-.chat__modeswitch {
+/* 品牌标识（替代旧的模式切换） */
+.chat__brand {
   display: inline-flex;
-  background: var(--agent-bg);
-  border: 1px solid var(--agent-border);
-  border-radius: 8px;
-  padding: 2px;
-  gap: 2px;
-}
-.chat__mode {
-  border: none;
-  background: transparent;
-  padding: 6px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  color: var(--agent-text-dim);
-  font-size: 13px;
-  transition: all 0.15s;
-}
-.chat__mode:hover:not(:disabled) { color: var(--agent-text); }
-.chat__mode[data-active='true'] {
-  background: var(--agent-primary);
-  color: #fff;
+  align-items: center;
+  gap: 6px;
+  color: var(--agent-primary, #c0723a);
   font-weight: 600;
+  font-size: 14px;
+  user-select: none;
 }
-.chat__mode:disabled { cursor: not-allowed; opacity: 0.6; }
+.chat__brand-emoji { font-size: 18px; }
+.chat__brand-text { white-space: nowrap; }
+
+/* 项目切换器 */
+.chat__project {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chat__project-select {
+  background: var(--agent-bg);
+  color: var(--agent-text);
+  border: 1px solid var(--agent-border);
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 4px 8px;
+  max-width: 180px;
+}
+.chat__project-select:focus-visible {
+  outline: 2px solid var(--agent-primary, #c0723a);
+}
+.chat__btn--mini {
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.chat__btn--danger {
+  color: var(--agent-error, #c0392b);
+  border-color: rgba(192, 57, 43, 0.5);
+}
+.chat__btn--danger:hover { background: rgba(192, 57, 43, 0.08); }
+
+/* 项目管理抽屉创建区 */
+.chat-projects__create {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--agent-border);
+  background: var(--agent-bg);
+}
+.chat-projects__input {
+  flex: 1;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--agent-border);
+  border-radius: 6px;
+  background: var(--agent-panel);
+  color: var(--agent-text);
+}
+.chat-projects__actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
 
 .chat__session-id {
   font-family: var(--agent-mono);
@@ -62,6 +99,39 @@
   padding: 2px 6px;
   border-radius: 4px;
 }
+
+/* 上下文 Token 占比面板 */
+.chat__token-stats {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--agent-text-dim);
+  background: var(--agent-bg);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--agent-mono);
+}
+.chat__token-label { white-space: nowrap; }
+.chat__token-bar-bg {
+  position: relative;
+  width: 60px;
+  height: 6px;
+  background: var(--agent-border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.chat__token-bar-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--agent-primary);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+.chat__token-bar-fill[data-warning='true'] { background: var(--agent-error, #c0392b); }
+.chat__token-text { font-variant-numeric: tabular-nums; min-width: 28px; text-align: right; }
 
 .chat__actions { display: flex; gap: 8px; margin-left: auto; }
 .chat__btn {

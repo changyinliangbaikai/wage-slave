@@ -1,5 +1,11 @@
 /**
- * AI 快速对话服务（主进程）
+ * 通用 LLM 流式调用服务（主进程，底层基础库）
+ *
+ * 历史背景：本文件曾承担「快速对话」窗口的流式 SSE 实现。该模式合并到 Agent
+ * 后（见 plan/next-steps-optimization.md §1），快速对话已废弃。本模块继续作为
+ * 无工具依赖的通用 LLM 调用基础库被复用：
+ *   - 晨间复盘 / 晚间复盘 / 定时总结
+ *   - 后续 /compact 永久摘要命令
  *
  * 能力：
  *  1. 基于 OpenAI 兼容接口的流式对话（SSE）
@@ -332,4 +338,48 @@ export async function startChat(
   } finally {
     activeControllers.delete(requestId)
   }
+}
+
+/**
+ * 非流式快速 LLM 调用（用于 /compact 摘要等场景）
+ * 与 startChat 共用底层配置，但只返回最终文本，不做事件推送
+ */
+export async function summarizeOnce(opts: {
+  apiKey: string
+  systemPrompt: string
+  userPrompt: string
+  maxTokens?: number
+  temperature?: number
+}): Promise<string> {
+  const { apiKey, systemPrompt, userPrompt, maxTokens = 800, temperature = 0.3 } = opts
+  const config = getConfig()
+  const baseUrl = config.llm_api_url.replace(/\/$/, '')
+  if (!apiKey) throw new Error('未配置 API Key')
+
+  const res = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.llm_model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature,
+      max_tokens: maxTokens,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`API ${res.status}: ${text.slice(0, 200)}`)
+  }
+  const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> }
+  const raw = data.choices?.[0]?.message?.content ?? ''
+  // 复用前端 strip 思路：去掉 <think>...</think> 推理块
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
 }

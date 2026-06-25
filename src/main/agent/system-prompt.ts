@@ -25,14 +25,17 @@ const WEEKDAYS_CN = ['周日', '周一', '周二', '周三', '周四', '周五',
 /**
  * 构建当前 Agent 上下文
  * 每次新 LLM 请求前都重新构建一次，保证时间/待办状态最新
+ *
+ * 支持传入 projectCwd 作为「工作目录」字段来源；
+ * 不传则使用 process.cwd（兼容旧调用方）。
  */
-export function buildAgentContext(): AgentContext {
+export function buildAgentContext(projectCwd?: string): AgentContext {
   const home = os.homedir()
   const now = new Date()
   const today = todayStr()
 
   return {
-    cwd: process.cwd(),
+    cwd: projectCwd && projectCwd.length > 0 ? projectCwd : process.cwd(),
     homePath: home,
     desktopPath: `${home}/Desktop`,
     documentsPath: `${home}/Documents`,

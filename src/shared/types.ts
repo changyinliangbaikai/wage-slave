@@ -65,6 +65,11 @@ export interface AppConfig {
    * Agent 路径白名单扩展：默认白名单之外，用户额外允许 Agent 访问的目录。
    */
   agent_allowed_paths_extra?: string[]
+  /**
+   * Agent LLM 推理强度（reasoning_effort）：仅对支持推理参数的模型生效（如 o1 / o3 / gpt-5 等）
+   * 取值：'low' / 'medium' / 'high'；空字符串或缺省表示不发送该参数
+   */
+  agent_reasoning_effort?: 'low' | 'medium' | 'high' | ''
 }
 
 /** Agent 工具分组元数据（仅用于设置页 UI 渲染） */
@@ -555,6 +560,15 @@ export interface AgentMessage {
   tool_name?: string
   /** 附件列表（仅 user 消息有；原文内容会在发送时拼接进 prompt） */
   attachments?: AIChatAttachment[]
+  /** 附加元数据（迭代轮次 / token 用量等） */
+  metadata?: {
+    model?: string
+    iteration?: number
+    promptTokens?: number
+    completionTokens?: number
+    totalTokens?: number
+    maxTokens?: number
+  }
   /** 创建时间（毫秒） */
   createdAt: number
 }
@@ -590,6 +604,8 @@ export interface AgentSessionMeta {
   messageCount: number
   /** 首条用户输入预览 */
   preview: string
+  /** 归属项目 id；缺省为 'default'（多项目支持） */
+  projectId?: string
 }
 
 /** Agent 完整会话 */
@@ -651,6 +667,14 @@ export interface AgentDonePayload {
     toolCalls: number
     totalDurationMs: number
   }
+  /** 最终一轮的 Token 使用情况（用于前端显示上下文占比） */
+  tokenUsage?: {
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
+    maxTokens: number
+    iteration?: number
+  }
   /** 本次结束是否由用户主动中断或超时触发（true 时上游应视为 failed） */
   aborted?: boolean
   abortReason?: 'user' | 'timeout'
@@ -678,6 +702,14 @@ export interface AgentToolStartPayload {
   }>
   /** 当前迭代轮次 */
   iteration: number
+  /** 本轮 LLM 调用的 Token 使用情况（用于前端实时显示上下文占比） */
+  tokenUsage?: {
+    promptTokens: number
+    completionTokens: number
+    totalTokens: number
+    maxTokens: number
+    iteration?: number
+  }
 }
 
 export interface AgentToolExecutingPayload {

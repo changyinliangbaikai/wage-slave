@@ -1,9 +1,12 @@
 /**
- * 统一对话状态管理 Hook（合并 AI 对话 + Agent 模式）
+ * 统一对话状态管理 Hook（仅支持 Agent 模式）
  *
- * 一个 Hook 同时支撑两种执行策略，由 `mode` 决定：
- *   - 'chat'  ：单轮流式，一条 assistant 消息按 messageId 流式更新
- *   - 'agent' ：多轮迭代，每轮一条 assistant（按 iteration 区分），携带工具卡片
+ * 历史背景：之前同时支持「快速对话 / Agent」双模式，后改为只保留 Agent 模式，
+ * 所有会话默认带工具调用 + 多轮规划能力（见 plan/next-steps-optimization.md §1）。
+ *
+ * - 会话 id 一律使用 'agent_' 前缀；
+ * - 流式状态由 `upsertStreamingAssistant` 维护，按 iteration 区分 assistant 消息；
+ * - 主进程在每轮迭代后自动 saveAgentSession 持久化，渲染端无需干预。
  *
  * 与主进程通过统一的 CHAT_* 通道通信：
  *   CHAT_START / CHAT_STOP / CHAT_CHUNK / CHAT_TOOL_EVENT / CHAT_DONE / CHAT_ERROR
@@ -12,7 +15,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { IPC } from '@shared/ipc-channels'
 import type {
-  ChatMode,
   ChatMessage,
   ChatSession,
   ChatSessionMeta,
@@ -24,6 +26,7 @@ import type {
   ChatStartResult,
 } from '@shared/types-chat'
 import type { AIChatAttachment } from '@shared/types'
+import type { Project } from '@shared/types-project'
 
 const DESKTOP_API_UNAVAILABLE = '当前页面未连接桌面端能力，请在小小牛马桌面应用窗口中使用对话。'
 
@@ -44,10 +47,9 @@ function genId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-/** 生成带模式前缀的会话 id（与主进程 chat-store 路由约定一致） */
-function genSessionId(mode: ChatMode): string {
-  const rand = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-  return mode === 'agent' ? `agent_${rand}` : `chat_${rand}`
+/** 生成 Agent 模式会话 id（与主进程 chat-store 路由约定一致） */
+function genSessionId(): string {
+  return `agent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
 /** 工具调用 UI 状态（与 ToolCallCard 对齐） */
@@ -69,27 +71,35 @@ export interface UIChatMessage extends ChatMessage {
   toolRuns?: ToolRunUI[]
   /** 是否仍在流式生成 */
   streaming?: boolean
-  /** Agent 模式：第几轮迭代 */
+  /** Agent 第几轮迭代 */
   iteration?: number
 }
 
 export interface UseChatResult {
   sessionId: string
-  mode: ChatMode
+  projectId: string
   messages: UIChatMessage[]
   running: boolean
   fatalError: string | null
   currentTool: string | null
   sendMessage: (content: string, attachments?: AIChatAttachment[]) => Promise<void>
   stopGeneration: () => Promise<void>
-  newSession: (mode?: ChatMode) => void
+  newSession: () => void
   loadSession: (id: string) => Promise<void>
-  switchMode: (mode: ChatMode) => void
+  switchProject: (projectId: string) => void
+  /**
+   * 解析 Slash 命令；
+   * 返回 { handled: true, transformedInput? } 表示已处理：
+   *   - transformedInput 存在 → 用它替换原始输入发给 LLM（模板插入型）
+   *   - transformedInput 不存在 → 命令已就地完成（状态控制型），调用方不应再发送
+   * 返回 { handled: false } 表示未识别为命令，调用方应按普通消息处理。
+   */
+  runSlashCommand: (input: string) => Promise<{ handled: boolean; transformedInput?: string }>
 }
 
-export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
-  const [mode, setMode] = useState<ChatMode>(initialMode)
-  const [sessionId, setSessionId] = useState<string>(() => genSessionId(initialMode))
+export function useChat(): UseChatResult {
+  const [sessionId, setSessionId] = useState<string>(() => genSessionId())
+  const [projectId, setProjectId] = useState<string>('default')
   const [messages, setMessages] = useState<UIChatMessage[]>([])
   const [running, setRunning] = useState(false)
   const [fatalError, setFatalError] = useState<string | null>(null)
@@ -97,16 +107,9 @@ export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
 
   // 事件回调里读最新值，避免闭包陷阱
   const sessionIdRef = useRef(sessionId)
-  const modeRef = useRef(mode)
-  const messagesRef = useRef(messages)
+  const projectIdRef = useRef(projectId)
   useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
-  useEffect(() => { modeRef.current = mode }, [mode])
-  useEffect(() => { messagesRef.current = messages }, [messages])
-
-  // ── 简单对话：按 messageId 更新单条 assistant ──
-  const patchMessageById = useCallback((id: string, patch: Partial<UIChatMessage>) => {
-    setMessages(prev => prev.map(m => (m.id === id ? { ...m, ...patch } : m)))
-  }, [])
+  useEffect(() => { projectIdRef.current = projectId }, [projectId])
 
   // ── Agent：按 iteration 维护流式 assistant ──
   const upsertStreamingAssistant = useCallback((iteration: number, content: string, reasoning: string) => {
@@ -164,68 +167,29 @@ export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
     })
   }, [])
 
-  // ── 简单对话：完成后持久化（Agent 由主进程自动持久化） ──
-  const persistChatSession = useCallback((msgs: UIChatMessage[]) => {
-    if (msgs.length === 0) return
-    const firstUser = msgs.find(m => m.role === 'user')
-    const title = (firstUser?.content ?? '新会话').slice(0, 24) || '新会话'
-    const preview = (firstUser?.content ?? '').replace(/\s+/g, ' ').slice(0, 80)
-    const now = Date.now()
-    const session: ChatSession = {
-      id: sessionIdRef.current,
-      title,
-      createdAt: msgs[0]?.createdAt ?? now,
-      updatedAt: now,
-      messageCount: msgs.length,
-      preview,
-      mode: 'chat',
-      messages: msgs.map(({ toolRuns: _t, streaming: _s, iteration: _i, ...rest }) => rest),
-      config: { mode: 'chat' },
-    }
-    api.invoke(IPC.CHAT_SAVE_SESSION, session).catch(() => { /* 保存失败不阻塞 UI */ })
-  }, [])
-
   // ── 发送消息 ──────────────────────────────────
   const sendMessage = useCallback(async (content: string, attachments?: AIChatAttachment[]) => {
     const trimmed = content.trim()
     if ((!trimmed && (!attachments || attachments.length === 0)) || running) return
 
     const id = sessionIdRef.current
-    const curMode = modeRef.current
-
     const userMsg: UIChatMessage = {
       id: genId('user'), role: 'user', content: trimmed, attachments, createdAt: Date.now(),
     }
-    const assistantId = genId('asst')
 
     setRunning(true)
     setFatalError(null)
     setCurrentTool(null)
-
-    // chat 模式预插入一条 assistant 占位用于流式；agent 模式由 iteration 流程动态插入
-    if (curMode === 'chat') {
-      const assistantMsg: UIChatMessage = {
-        id: assistantId, role: 'assistant', content: '', reasoning: '', streaming: true, createdAt: Date.now(),
-      }
-      setMessages(prev => [...prev, userMsg, assistantMsg])
-    } else {
-      setMessages(prev => [...prev, userMsg])
-    }
-
-    // chat 模式需要把历史一并带给主进程（仅 role/content/attachments）
-    const history = curMode === 'chat'
-      ? messagesRef.current
-          .filter(m => m.role === 'user' || (m.role === 'assistant' && m.content))
-          .map(m => ({ role: m.role, content: m.content, attachments: m.attachments }))
-      : undefined
+    // Agent 模式由主进程在每轮迭代后推送 chunk 时动态插入 assistant
+    setMessages(prev => [...prev, userMsg])
 
     const params: ChatStartParams = {
       sessionId: id,
-      mode: curMode,
+      mode: 'agent',
       userInput: trimmed,
       attachments,
-      assistantMessageId: curMode === 'chat' ? assistantId : undefined,
-      history,
+      // 把当前选中的项目透传到主进程，决定 Agent 的工作目录与白名单
+      projectId: projectIdRef.current,
     }
 
     const fail = (msg: string) => {
@@ -249,21 +213,13 @@ export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
     } catch { /* 任务已结束或桥不可用 */ }
   }, [])
 
-  const newSession = useCallback((nextMode?: ChatMode) => {
+  const newSession = useCallback(() => {
     if (running) return
-    const m = nextMode ?? modeRef.current
-    setMode(m)
-    setSessionId(genSessionId(m))
+    setSessionId(genSessionId())
     setMessages([])
     setFatalError(null)
     setCurrentTool(null)
   }, [running])
-
-  /** 切换模式：开启该模式下的新会话（mode 是会话级配置） */
-  const switchMode = useCallback((nextMode: ChatMode) => {
-    if (running || nextMode === modeRef.current) return
-    newSession(nextMode)
-  }, [running, newSession])
 
   const loadSession = useCallback(async (id: string) => {
     if (running) return
@@ -275,12 +231,117 @@ export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
       return
     }
     if (!session) return
-    setMode(session.mode)
     setSessionId(id)
-    setMessages(projectMessagesToUI(session.messages, session.mode))
+    // 加载历史时自动切换到会话归属的项目
+    if (session.projectId) setProjectId(session.projectId)
+    setMessages(projectMessagesToUI(session.messages))
     setFatalError(null)
     setCurrentTool(null)
   }, [running])
+
+  /** 切换项目：清空当前会话状态，新建一个属于目标项目的会话 */
+  const switchProject = useCallback((next: string) => {
+    if (running || !next || next === projectIdRef.current) return
+    setProjectId(next)
+    setSessionId(genSessionId())
+    setMessages([])
+    setFatalError(null)
+    setCurrentTool(null)
+  }, [running])
+
+  /** 在消息流中插入一条"系统提示"气泡（仅前端展示，不进入会话历史发送给 LLM） */
+  const appendSystemMessage = useCallback((content: string) => {
+    const msg: UIChatMessage = {
+      id: genId('sys'),
+      role: 'assistant',
+      content,
+      createdAt: Date.now(),
+      // 用一个独特 iteration（-1）标识"非真实 LLM 输出"，避免与流式状态冲突
+      iteration: -1,
+      streaming: false,
+    }
+    setMessages(prev => [...prev, msg])
+  }, [])
+
+  /** 解析并执行 Slash 命令 */
+  const runSlashCommand = useCallback(async (raw: string): Promise<{ handled: boolean; transformedInput?: string }> => {
+    const trimmed = raw.trim()
+    if (!trimmed.startsWith('/')) return { handled: false }
+
+    // 解析 "/cmd arg1 arg2..."
+    const space = trimmed.indexOf(' ')
+    const cmd = (space === -1 ? trimmed : trimmed.slice(0, space)).toLowerCase()
+    const arg = space === -1 ? '' : trimmed.slice(space + 1).trim()
+
+    switch (cmd) {
+      case '/help': {
+        appendSystemMessage(buildHelpText())
+        return { handled: true }
+      }
+
+      case '/plan': {
+        // 模板插入型：把"先在 plan/proposal.md 中写下你的计划"的指令前置注入
+        const planPrompt = `[计划模式]
+进入计划模式：本次任务请先在当前项目的工作目录下创建或更新 plan/proposal.md，写下你的实施步骤、关键改动点与潜在风险。
+- 在用户明确批准 plan/proposal.md 之前，**禁止**对源码或配置文件进行任何写入、编辑、删除操作。
+- 你可以使用 read_file、grep_code、glob_files、list_files 等只读工具收集信息。
+- 完成 proposal 后输出一段简短摘要并询问用户是否同意按此计划执行。
+
+用户原始任务：
+${arg || '(空)'}`
+        return { handled: true, transformedInput: planPrompt }
+      }
+
+      case '/model': {
+        if (!arg) {
+          const cfg = await getAppConfig()
+          const cur = cfg.agent_llm_model || cfg.llm_model || '(未配置)'
+          appendSystemMessage(`当前模型：\`${cur}\`\n\n用法：\`/model <模型名>\` 切换 Agent 使用的模型`)
+        } else {
+          const ok = await setAppConfig({ agent_llm_model: arg })
+          appendSystemMessage(ok ? `已切换 Agent 模型为：\`${arg}\`` : '切换模型失败')
+        }
+        return { handled: true }
+      }
+
+      case '/effort': {
+        const lvl = arg.toLowerCase()
+        if (!arg) {
+          const cfg = await getAppConfig()
+          appendSystemMessage(`当前推理强度：\`${(cfg.agent_reasoning_effort as string) || '默认'}\`\n\n用法：\`/effort low | medium | high\``)
+          return { handled: true }
+        }
+        if (lvl !== 'low' && lvl !== 'medium' && lvl !== 'high') {
+          appendSystemMessage('推理强度只能是 low / medium / high')
+          return { handled: true }
+        }
+        const ok = await setAppConfig({ agent_reasoning_effort: lvl })
+        appendSystemMessage(ok ? `已设置推理强度为：\`${lvl}\`（仅对支持 reasoning 的模型生效）` : '设置失败')
+        return { handled: true }
+      }
+
+      case '/compact': {
+        appendSystemMessage('⏳ 正在压缩会话历史...')
+        const res = await compactSession(sessionIdRef.current)
+        if (!res.ok) {
+          appendSystemMessage(`❌ /compact 失败：${res.error}`)
+          return { handled: true }
+        }
+        // 压缩成功后重载会话，确保前端拿到最新的折叠后历史
+        try {
+          const session = (await api.invoke(IPC.CHAT_GET_SESSION, sessionIdRef.current)) as ChatSession | null
+          if (session) setMessages(projectMessagesToUI(session.messages))
+        } catch { /* ignore */ }
+        appendSystemMessage(`✅ 已永久压缩 ${res.removed ?? 0} 条历史为摘要：\n\n${res.summary ?? ''}`)
+        return { handled: true }
+      }
+
+      default: {
+        appendSystemMessage(`未识别的命令：\`${cmd}\`\n输入 \`/help\` 查看所有可用命令`)
+        return { handled: true }
+      }
+    }
+  }, [appendSystemMessage])
 
   // ── IPC 事件订阅 ─────────────────────────────
   useEffect(() => {
@@ -290,14 +351,31 @@ export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
       if (!mine(p.sessionId)) return
       if (typeof p.iteration === 'number') {
         upsertStreamingAssistant(p.iteration, p.content, p.reasoning)
-      } else if (p.messageId) {
-        patchMessageById(p.messageId, { content: p.content, reasoning: p.reasoning })
       }
     }) as (...a: unknown[]) => void)
 
     const offTool = api.on(IPC.CHAT_TOOL_EVENT, ((p: ChatToolEventPayload) => {
       if (!mine(p.sessionId)) return
       if (p.phase === 'start' && typeof p.iteration === 'number' && p.toolCalls) {
+        // 截断 Bug 修复：进入工具执行阶段时，立刻把上一轮 streaming 状态关闭，
+        // 同时把本轮 LLM 的 tokenUsage 写入对应 assistant 的 metadata（用于上下文进度条）
+        const iter = p.iteration
+        const tu = p.tokenUsage
+        setMessages(prev => prev.map(m => {
+          if (m.role !== 'assistant' || m.iteration !== iter) return m
+          const next: UIChatMessage = { ...m, streaming: false }
+          if (tu) {
+            next.metadata = {
+              ...(m.metadata ?? {}),
+              iteration: iter,
+              promptTokens: tu.promptTokens,
+              completionTokens: tu.completionTokens,
+              totalTokens: tu.totalTokens,
+              maxTokens: tu.maxTokens,
+            }
+          }
+          return next
+        }))
         attachToolRuns(p.iteration, p.toolCalls)
       } else if (p.phase === 'executing' && p.toolId) {
         setCurrentTool(p.toolName ?? null)
@@ -317,23 +395,23 @@ export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
       if (!mine(p.sessionId)) return
       setRunning(false)
       setCurrentTool(null)
-      let finalMsgs: UIChatMessage[] = []
-      setMessages(prev => {
-        const next = prev.map((m, idx) => {
-          // chat 模式：定位 messageId；agent 模式：收尾最后一条 streaming assistant
-          const isTarget = p.messageId
-            ? m.id === p.messageId
-            : idx === prev.length - 1 && m.role === 'assistant' && m.streaming
-          if (!isTarget) return m
-          return { ...m, streaming: false, content: p.content || m.content, reasoning: p.reasoning ?? m.reasoning, stats: p.stats ?? m.stats }
-        })
-        finalMsgs = next
-        return next
-      })
-      // chat 模式由渲染端持久化；agent 模式主进程已自动持久化
-      if (modeRef.current === 'chat') {
-        setTimeout(() => persistChatSession(finalMsgs), 0)
-      }
+      setMessages(prev => prev.map((m, idx) => {
+        // 收尾最后一条 streaming assistant；把最终的 tokenUsage 合并入 metadata
+        const isTarget = idx === prev.length - 1 && m.role === 'assistant' && m.streaming
+        if (!isTarget) return m
+        const tu = p.tokenUsage
+        const mergedMeta = tu
+          ? {
+              ...(m.metadata ?? {}),
+              iteration: tu.iteration ?? m.metadata?.iteration,
+              promptTokens: tu.promptTokens,
+              completionTokens: tu.completionTokens,
+              totalTokens: tu.totalTokens,
+              maxTokens: tu.maxTokens,
+            }
+          : m.metadata
+        return { ...m, streaming: false, content: p.content || m.content, reasoning: p.reasoning ?? m.reasoning, metadata: mergedMeta }
+      }))
     }) as (...a: unknown[]) => void)
 
     const offError = api.on(IPC.CHAT_ERROR, ((p: ChatErrorPayload) => {
@@ -348,22 +426,112 @@ export function useChat(initialMode: ChatMode = 'chat'): UseChatResult {
     }) as (...a: unknown[]) => void)
 
     return () => { offChunk(); offTool(); offDone(); offError() }
-  }, [upsertStreamingAssistant, attachToolRuns, updateToolRun, patchMessageById, persistChatSession])
+  }, [upsertStreamingAssistant, attachToolRuns, updateToolRun])
 
   return {
-    sessionId, mode, messages, running, fatalError, currentTool,
-    sendMessage, stopGeneration, newSession, loadSession, switchMode,
+    sessionId, projectId, messages, running, fatalError, currentTool,
+    sendMessage, stopGeneration, newSession, loadSession, switchProject,
+    runSlashCommand,
+  }
+}
+
+/** 命令帮助文本 */
+function buildHelpText(): string {
+  return `### 🐱 小小牛马 Slash 命令
+
+| 命令 | 说明 |
+| --- | --- |
+| \`/help\` | 显示本帮助 |
+| \`/plan <任务描述>\` | 进入计划模式：要求 Agent 先把方案写入 \`plan/proposal.md\`，未经批准前禁止改代码 |
+| \`/model [模型名]\` | 查看或切换 Agent 使用的模型（不带参数则只读当前模型） |
+| \`/effort low\|medium\|high\` | 设置 reasoning 推理强度（仅支持 reasoning 的模型生效） |
+| \`/compact\` | 永久压缩当前会话历史：保留首条 user + 最近 4 条，其余压成一段摘要 |
+
+> 命令在前端拦截执行；状态控制型命令不会发送给 LLM。`
+}
+
+// ─────────────────────────────────────────────
+// 项目管理：暴露给页面的简洁封装
+// ─────────────────────────────────────────────
+export async function listProjects(): Promise<Project[]> {
+  try {
+    return (await api.invoke(IPC.PROJECT_LIST)) as Project[]
+  } catch {
+    return []
+  }
+}
+
+export async function createProject(input: { name: string; path?: string; createDir?: boolean }): Promise<{ ok: boolean; project?: Project; error?: string }> {
+  try {
+    return (await api.invoke(IPC.PROJECT_CREATE, input)) as { ok: boolean; project?: Project; error?: string }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '创建项目失败' }
+  }
+}
+
+export async function renameProject(id: string, name: string): Promise<boolean> {
+  try {
+    const res = (await api.invoke(IPC.PROJECT_RENAME, { id, name })) as { ok: boolean }
+    return Boolean(res?.ok)
+  } catch {
+    return false
+  }
+}
+
+export async function deleteProject(id: string): Promise<boolean> {
+  try {
+    const res = (await api.invoke(IPC.PROJECT_DELETE, id)) as { ok: boolean }
+    return Boolean(res?.ok)
+  } catch {
+    return false
+  }
+}
+
+export async function pickProjectDir(): Promise<string | null> {
+  try {
+    const res = (await api.invoke(IPC.PROJECT_PICK_DIR)) as { ok: boolean; path?: string; canceled?: boolean }
+    if (res?.ok && res.path) return res.path
+    return null
+  } catch {
+    return null
   }
 }
 
 // ─────────────────────────────────────────────
-// 历史消息投影：把扁平存储消息转为带 toolRuns 的 UI 消息
+// /compact 永久压缩当前会话
 // ─────────────────────────────────────────────
-function projectMessagesToUI(messages: ChatMessage[], mode: ChatMode): UIChatMessage[] {
-  if (mode === 'chat') {
-    return messages.filter(m => m.role !== 'tool').map(m => ({ ...m }))
+export async function compactSession(sessionId: string): Promise<{ ok: boolean; error?: string; summary?: string; removed?: number }> {
+  try {
+    return (await api.invoke(IPC.CHAT_COMPACT_SESSION, sessionId)) as { ok: boolean; error?: string; summary?: string; removed?: number }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '/compact 调用失败' }
   }
+}
 
+// ─────────────────────────────────────────────
+// 通用配置读写（用于 /model、/effort）
+// ─────────────────────────────────────────────
+export async function getAppConfig(): Promise<Record<string, unknown>> {
+  try {
+    return (await api.invoke(IPC.CONFIG_GET)) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+export async function setAppConfig(patch: Record<string, unknown>): Promise<boolean> {
+  try {
+    await api.invoke(IPC.CONFIG_SET, patch)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// ─────────────────────────────────────────────
+// 历史消息投影：把扁平存储消息转为带 toolRuns 的 UI 消息（始终按 Agent 模式渲染）
+// ─────────────────────────────────────────────
+function projectMessagesToUI(messages: ChatMessage[]): UIChatMessage[] {
   // agent：role=tool 的结果回填到对应 assistant 的 toolRuns
   const ui: UIChatMessage[] = []
   const toolResult = new Map<string, { output?: string; error?: string }>()
@@ -408,9 +576,12 @@ function inferToolSafety(name: string): ToolRunUI['safetyLevel'] {
 }
 
 // ── 会话列表/管理（暴露给页面） ────────────────
-export async function listChatSessions(): Promise<ChatSessionMeta[]> {
+/**
+ * 列出会话；可按项目过滤（不传则返回全部）
+ */
+export async function listChatSessions(opts?: { projectId?: string }): Promise<ChatSessionMeta[]> {
   try {
-    return (await api.invoke(IPC.CHAT_LIST_SESSIONS)) as ChatSessionMeta[]
+    return (await api.invoke(IPC.CHAT_LIST_SESSIONS, opts)) as ChatSessionMeta[]
   } catch {
     return []
   }
@@ -418,17 +589,8 @@ export async function listChatSessions(): Promise<ChatSessionMeta[]> {
 
 export async function deleteChatSession(id: string): Promise<boolean> {
   try {
-    const r = (await api.invoke(IPC.CHAT_DELETE_SESSION, id)) as { ok: boolean }
-    return Boolean(r?.ok)
-  } catch {
-    return false
-  }
-}
-
-export async function renameChatSession(id: string, title: string): Promise<boolean> {
-  try {
-    const r = (await api.invoke(IPC.CHAT_RENAME_SESSION, { id, title })) as { ok: boolean }
-    return Boolean(r?.ok)
+    const res = (await api.invoke(IPC.CHAT_DELETE_SESSION, id)) as { ok: boolean }
+    return Boolean(res?.ok)
   } catch {
     return false
   }

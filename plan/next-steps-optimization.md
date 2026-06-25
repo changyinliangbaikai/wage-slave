@@ -274,3 +274,30 @@ if (tail.content) fullContent += tail.content
    - 让 Agent 写一长串话，在它需要调用工具前（如写一段话并存入 todo），仔细核对前端 UI 的最后一个标点符号与 Jarvis Studio Trace 日志中的 `llm.call` output 字符串，验证字符数量是否达到 100% 字节一致。
 4. **Token 显示测试**：
    - 发送 2 轮以上的上下文对话，核对右上角的 `🧠 Context` 状态数值是否随着对话历史变长而正确累积，且不超过设定上限。
+
+---
+
+## 7. 与 Claude Code 同类功能实现的对比与参考
+
+本方案中多个关键模块的设计思想直接对标并借鉴了 Claude Code 源码的工程实践，具体映射如下：
+
+### 7.1 指令系统与计划模式 (`/compact` & `/plan`)
+- **Claude Code 原理**：
+  - Claude Code 的 `/compact` 指令（见 `commands/compact/compact.ts`）在检测到 Tokens 压力或人工触发时，首先运行 `microcompact`（去除无用空白），接着通过 `compactConversation` 对旧历史调用 LLM 进行非对称摘要，最后利用 `setLastSummarizedMessageId` 重构会话列表。
+  - `/plan` 指令（见 `commands/plan/plan.tsx`）通过将内部 `appState` 的模式从 `'default'` 切换到 `'plan'`，改变了工具调用上下文中的安全策略（`prepareContextForPlanMode`），并调用外部编辑器让用户编辑临时计划文件。
+- **本方案适配**：
+  - 本方案中的 `/compact` 借鉴了其非对称摘要的思想，在主进程通过 `llm-service.ts` 的非流式请求将旧历史做概括，直接在 JSON 中抹去旧数据并代以一条摘要气泡，使得 Electron 客户端的存储与交互更轻量。
+  - `/plan` 摒弃了 Claude Code 中基于 React Ink 终端终端渲染和全局 state 状态机锁定的复杂逻辑，改用轻量化的**“提示词模式注入”**。通过预置 Prompt 强制引导 Agent 在本地工作区创建 `plan/proposal.md` 并不做其他修改，完美在 Electron GUI 中复现了计划模式的安全限制效果。
+
+### 7.2 上下文管理与工具指纹化 (`context-compressor.ts`)
+- **Claude Code 原理**：
+  - Claude Code 在大长对话下，使用 `Function Result Clearing` 策略将一些几轮前的只读工具调用结果（如巨大的 `cat` / `read_file` 返回内容）物理清理，仅保留首行摘要以节省 Prompt 空间。
+- **本方案适配**：
+  - 本方案中既有的 `context-compressor.ts` 设计即是对标这一原理。其“阶段 0：工具结果指纹化”会随着上下文总长度自动触发，将较早的 `tool` 消息体内容削减为 `[工具结果已清理 - ...] 引用`，只保留最新的数个只读工具输出，该算法是完全本地、确定性的，从而在不增加 LLM 交互开销的前提下极大地降低了 Prompt Caching 不一致概率。
+
+### 7.3 工作目录传递与安全边界 (`projectCwd` & `assertSafePath`)
+- **Claude Code 原理**：
+  - Claude Code 在 `ToolUseContext` 中携带 `additionalWorkingDirectories`。它的所有文件读写和 Shell 工具（如 `BashTool`）不依赖在系统进程层面频繁切换 `process.chdir`，而是将上下文对象向下层层分发，在执行的最终叶子节点由白名单逻辑进行绝对路径的强制校验。
+- **本方案适配**：
+  - 本方案完全借鉴了这种非全局式（并发安全）的工作区路径判定设计。我们在 `AgentOrchestrator` 内维护 `projectCwd`，并将其顺着 `executeTool` 传导到各工具函数的具体实现。在工具解析任何相对路径时，先与其进行绝对路径拼合，再经过 `assertSafePath` 判定其是否在 `projects.json` 下的已注册项目白名单边界内，解决了并发对话时的竞态安全问题。
+

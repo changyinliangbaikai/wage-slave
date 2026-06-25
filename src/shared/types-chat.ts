@@ -57,6 +57,14 @@ export interface ChatMessage {
     model?: string
     /** Agent 第几轮迭代 */
     iteration?: number
+    /** 本轮提示词 token 数（来自 OpenAI usage.prompt_tokens） */
+    promptTokens?: number
+    /** 本轮补全 token 数（usage.completion_tokens） */
+    completionTokens?: number
+    /** 本轮合计 token（usage.total_tokens） */
+    totalTokens?: number
+    /** 模型上下文窗口上限（用于前端计算占比；缺省 32768） */
+    maxTokens?: number
   }
   createdAt: number
 }
@@ -94,6 +102,8 @@ export interface ChatSessionMeta {
   preview: string
   /** 会话模式（来源于 config.mode，列表用） */
   mode: ChatMode
+  /** 归属项目 id；缺省按 'default' 处理（用于多项目过滤） */
+  projectId?: string
 }
 
 /** 完整会话（元数据 + 消息 + 配置 + 统计） */
@@ -101,6 +111,8 @@ export interface ChatSession extends ChatSessionMeta {
   messages: ChatMessage[]
   config: ChatSessionConfig
   stats?: ChatSessionStats
+  /** 归属项目 id（在 Meta 基础上同步存储到完整会话，便于按项目过滤） */
+  projectId?: string
 }
 
 /** 搜索命中结果 */
@@ -133,6 +145,8 @@ export interface ChatStartParams {
   systemPrompt?: string
   /** Agent 模式：覆盖最大迭代轮次 */
   maxIterations?: number
+  /** 当前会话归属的项目 id；缺省为 'default' */
+  projectId?: string
 }
 
 /** 流式文本/思考增量（main → renderer） */
@@ -143,6 +157,17 @@ export interface ChatChunkPayload {
   content: string
   reasoning: string
   /** Agent 模式：当前迭代轮次 */
+  iteration?: number
+}
+
+/** Token 使用量元信息（用于 UI 显示上下文占比） */
+export interface ChatTokenUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  /** 模型上下文窗口上限（推断或来自配置） */
+  maxTokens: number
+  /** 当前迭代轮次（Agent 模式） */
   iteration?: number
 }
 
@@ -162,6 +187,8 @@ export interface ChatToolEventPayload {
     safetyLevel: 'safe' | 'cautious' | 'sensitive'
     arguments: Record<string, unknown>
   }>
+  /** phase=start：本轮 LLM 调用的 token 使用情况，便于前端实时显示上下文占比 */
+  tokenUsage?: ChatTokenUsage
   /** phase=executing/executed：单个工具 */
   toolId?: string
   toolName?: string
@@ -187,6 +214,8 @@ export interface ChatDonePayload {
     toolCalls: number
     totalDurationMs: number
   }
+  /** 最终一轮的 token 使用情况（Agent 模式：最后一轮 LLM 输出） */
+  tokenUsage?: ChatTokenUsage
   /** 是否被用户/超时中断 */
   aborted?: boolean
 }

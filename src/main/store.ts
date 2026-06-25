@@ -63,6 +63,8 @@ const DEFAULT_CONFIG: AppConfig = {
   agent_max_iterations: 20,
   // Agent 路径白名单扩展：默认空，用户可在设置页添加额外允许目录
   agent_allowed_paths_extra: [],
+  // Agent 推理强度：默认空（不发送 reasoning_effort 参数）
+  agent_reasoning_effort: '',
 }
 
 // ── 配置 ──────────────────────────────────────
