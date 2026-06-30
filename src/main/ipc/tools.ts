@@ -118,4 +118,16 @@ export function registerToolsIPC(): void {
       return { ok: false, error: msg }
     }
   })
+
+  // 打开本地路径（文件或文件夹）
+  ipcMain.handle(IPC.SHELL_OPEN_PATH, async (_e, targetPath: string) => {
+    try {
+      if (!targetPath) return { ok: false, error: '路径为空' }
+      const err = await shell.openPath(targetPath)
+      if (err) return { ok: false, error: err }
+      return { ok: true }
+    } catch (e: any) {
+      return { ok: false, error: e.message || String(e) }
+    }
+  })
 }

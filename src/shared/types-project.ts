@@ -16,6 +16,10 @@ export interface Project {
   path: string
   /** 创建时间戳（毫秒） */
   createdAt: number
+  /** 是否置顶（可选） */
+  pinned?: boolean
+  /** 置顶时间戳（毫秒，用于排序，可选） */
+  pinnedAt?: number
 }
 
 /** 默认项目 id（始终存在，不可删除） */

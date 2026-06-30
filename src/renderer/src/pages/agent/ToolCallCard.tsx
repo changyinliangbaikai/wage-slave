@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ToolRunUI } from '../../hooks/useAgent'
+import type { ToolRunUI } from '../../hooks/useChat'
 
 /** 提取工具参数的精简摘要 */
 function getToolArgsSummary(name: string, args: any): string {
@@ -101,10 +101,6 @@ export function ToolCallCard({ run }: { run: ToolRunUI }) {
         )}
         <span className="agent-tool-card__chevron">{expanded ? '▾' : '▸'}</span>
       </button>
-
-      {description && !expanded && (
-        <div className="agent-tool-card__desc">{description}</div>
-      )}
 
       {expanded && (
         <div className="agent-tool-card__body">

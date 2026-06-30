@@ -2,17 +2,20 @@
 
 > **方案状态**：待评审/可执行  
 > **重构目标**：将小小牛马（xiao-niu-ma）的对话与项目管理界面，重构为类似于 Codex 客户端的**双栏工作台布局**。  
-> **设计约束**：**保留原有的“暖米黄配方”与“橙棕猫咪”暖色调风格**，仅对界面的排版、布局、树状交互、卡片组件及输入区进行结构性重构，不引入暗色主题。  
-> **核心特征**：一体化无边框窗口、左侧常驻多维项目/会话导航栏、右侧温暖对话流、卡片式附件/大文件预览、Git 式文件变更审核卡片，以及底部浮动胶囊式输入框。
+> **设计约束**：
+> 1. **保留原有的“暖米黄配方”与“橙棕猫咪”暖色调风格**，仅对界面的排版、布局、树状交互、卡片组件及输入区进行结构性重构，不引入暗色主题。
+> 2. **设置界面一体化**：设置界面不再通过新建 Electron 窗口打开，而是直接作为右侧主显示区的子视图跳转。
+> 3. **账户管理弹窗**：在左下角用户 Profile 点击时，弹出包含账户与设置项的菜单浮层，预留并置灰置空非核心账号项，保留设置跳转。
+> 4. **自定义命令确认弹窗**：废弃非常丑陋且容易被长命令撑爆高度的 Electron 原生系统确认框，重构为**基于 HTML/React 的内嵌式自定义弹窗**，支持长命令滚动展示、一键复制及安全兜底。
 
 ---
 
 ## 1. 界面与交互架构设计 (UI & UX Architecture)
 
-### 1.1 布局重构对比
+### 1.1 界面排版对比与新版视图设计
 
+#### 1.1.1 现有布局（扁平单栏卡片式）
 ```
-[现有布局]：扁平单栏 (暖米黄卡片式)
 ┌────────────────────────────────────────────────────────┐
 │ 顶部：🐱 小小牛马 | 项目下拉切换 📁 | 新会话 | 历史抽屉    │
 ├────────────────────────────────────────────────────────┤
@@ -22,53 +25,97 @@
 ├────────────────────────────────────────────────────────┤
 │ 底部：附件列表 (平铺) + 矩形输入框 (带有发送/停止)      │
 └────────────────────────────────────────────────────────┘
-
-[Codex 风格布局]：双栏常驻工作台 (继承暖米黄配色)
-┌──────────────────────┬─────────────────────────────────┐
-│ ◀ ▶  新建  搜索  插件 │ 📁 梳理项目全貌 ...  [5.5超高 ▾]   │
-├──────────────────────┼─────────────────────────────────┤
-│ 项目                 │                                 │
-│ 📁 mark-eight-octo   │ Bullet 列表与 橙/棕排版回复...   │
-│ 📁 xiao-niu-ma (激活)│                                 │
-│   📄 生成测试Excel ⌘9 │ ┌─────────────────────────────┐ │
-│   📄 梳理项目全貌 2周 │ │ 📄 architecture.md  [打开方式▾]│ │
-│                      │ └─────────────────────────────┘ │
-│ 2025                 │ ┌─────────────────────────────┐ │
-│ 📁 mark-twelve-duck  │ │ 🛠️ 已编辑 13 个文件   [撤销] [审核]│ │
-│                      │ └─────────────────────────────┘ │
-│ 对话                 │                                 │
-│ 💬 Say hello   16h   │        ┌──────────────────┐     │
-├──────────────────────┤        │  要求后续变更    │     │
-│ 👤 jhxstudio    [⚙]  │        │ + 帮我审批▾  5.5▾│     │
-│    Plus              │        └──────────────────┘     │
-└──────────────────────┴─────────────────────────────────┘
 ```
 
-### 1.2 暖色视觉设计变量映射 (Theme Color Mapping)
+#### 1.1.2 新版 Codex 风格布局（双栏常驻工作台）
+```
+┌───────────────────────────────────┬────────────────────────────────────────────────────────┐
+│ [拖拽区] ◀   ▶   新建   搜索   插件 │ 📁 梳理项目全貌               ...  [🧠 5.5 超高 ▾] [◫] [⚙]│
+├───────────────────────────────────┼────────────────────────────────────────────────────────┤
+│ 【 项目 】                         │                                                        │
+│ 📁 mark-eight-octopus             │  • npm run typecheck 通过                              │
+│ 📁 mark-six-reboot                │  • npm run lint 通过                                   │
+│ 📁 mark-zero-jarvis               │                                                        │
+│ 📁 xiao-niu-ma (当前激活项目)     │  保留未刷的部分：AIChat.tsx，用时约 5分10秒。          │
+│   📄 生成测试Excel           ⌘9   │                                                        │
+│   📄 梳理项目全貌 (当前会话)  2周 │  ┌──────────────────────────────────────────────────┐  │
+│                                   │  │ 📄 architecture.md                [ 打开方式 ▾ ] │  │
+│ 【 2025 】                        │  └──────────────────────────────────────────────────┘  │
+│ 📁 mark-twelve-duck               │  ┌──────────────────────────────────────────────────┐  │
+│ 📁 第三代数仓建设                 │  │ 💾 已编辑 13 个文件                 撤销 ↩  审核 ✓ │  │
+│ 📁 数智徐农                       │  │ +22 -86                                          │  │
+│                                   │  │ docs/architecture.md                        +16  │  │
+│ 【 对话 】                         │  │ 再显示 10 个文件 ▾                                │  │
+│ 💬 Say hello                  16h │  └──────────────────────────────────────────────────┘  │
+│ 💬 打招呼                     16h │    [复制] [赞] [踩] [重新生成]                             │
+├───────────────────────────────────┤                                                        │
+│                                   │                  ┌──────────────────┐                  │
+│ 👤 jhxstudio                 [⚙]  │                  │ 要求后续变更     │                  │
+│    Plus                           │                  │ + 帮我审批▾  5.5▾│                  │
+└───────────────────────────────────┴──────────────────┴──────────────────┴─────────────────┘
+```
 
-利用原本定义在 `Chat.css` 中的 `--agent-*` 配色变量，建立与 Codex 布局组件的映射：
+#### 1.1.3 自定义账户弹出菜单浮层 (AccountPopover)
+```
+  ┌─────────────────────────┐
+  │ jhxlovelmm@gmail.com    │  <-- 邮箱标识 (置灰)
+  │ 👤 个人帐户             │  <-- 个人账户入口 (置灰)
+  ├─────────────────────────┤
+  │ ℹ 个人资料              │  <-- 个人资料 (置灰)
+  │ ⚙ 设置              ⌘,  │  <-- 点击切换至 Settings 嵌入视图 (高亮可用)
+  └─────────────────────────┘
+  [👤 jhxstudio        [⚙] ]
+```
 
-| 视觉概念 | 原有变量名 | 默认颜色值 (暖米黄配方) | 对应 Codex 布局应用 |
+---
+
+### 1.2 自定义命令确认弹窗视图设计 (Command Modal View)
+
+当 Agent 发起敏感指令时，会触发如下内嵌自定义弹窗，长命令内容可局部滚动，防止破坏整体窗口尺寸：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 🤖 Agent 请求执行命令                                    [×] │
+├─────────────────────────────────────────────────────────────┤
+│ 工作目录：/Users/jhx/.../xiao-niu-ma                         │
+│ 超时时间：30 秒                                             │
+│                                                             │
+│ ┌───────────────────────────────────────────────[复制]──┐ │
+│ │ npm run build && npm run test && git commit -m "..."   │ │
+│ │ (支持超长命令局部滚动展示，最高限制 250px)               │ │
+│ └───────────────────────────────────────────────────────┘ │
+│ ⚠️ 命令将在你本机执行。如果不确定其行为，请点【拒绝】。       │
+├─────────────────────────────────────────────────────────────┤
+│                          [拒绝 (Esc)]    [允许执行 (Enter)]  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 1.3 暖色视觉设计变量映射 (Theme Color Mapping)
+
+| 视觉概念 | 原有变量名 | 默认颜色值 (暖米黄配方) | 对应 Codex 布局与自定义弹窗应用 |
 | :--- | :--- | :--- | :--- |
-| **主背景色** | `--agent-bg` | `#f7f5ef` (米黄纸张) | 右侧主聊天区背景、代码块背景 |
+| **主背景色** | `--agent-bg` | `#f7f5ef` (米黄纸张) | 右侧主聊天区背景、代码块背景、设置面板背景、弹窗内命令展示框背景 |
 | **侧边栏背景** | `--sidebar-bg` [NEW] | `#ede9de` (略深的温暖卡其) | 左侧常驻导航栏，与聊天区拉开层次 |
-| **面板/卡片背景** | `--agent-panel` | `#fffef7` (暖乳白) | 附件文件卡片、Git 变更卡片、弹出菜单、抽屉 |
-| **输入框/胶囊背景**| `--agent-panel-alt`| `#fffef0` (微黄乳白) | 底部浮动胶囊输入框、按钮背景 |
-| **边框主色** | `--agent-border` | `#e5e0d1` (温暖浅卡其) | 所有分栏分割线、卡片边框、输入框边框 |
-| **边框强化色** | `--agent-border-strong` | `#d6cdb6` (中卡其) | 聚焦状态边框、激活元素边框 |
-| **文字主色** | `--agent-text` | `#3a2a1a` (深咖啡/深棕) | 正文字体、图标主色 |
-| **文字副色** | `--agent-text-dim` | `#8b7a5d` (暖秋灰) | 辅助信息、时间戳、未激活按钮 |
+| **面板/卡片背景** | `--agent-panel` | `#fffef7` (暖乳白) | 附件卡片、Git 变更卡片、账户浮动菜单、设置区段背景、确认弹窗背景 |
+| **输入框/胶囊背景**| `--agent-panel-alt`| `#fffef0` (微黄乳白) | 胶囊输入框、按钮背景、文本框背景、弹窗内参数展示区 |
+| **边框主色** | `--agent-border` | `#e5e0d1` (温暖浅卡其) | 所有分栏分割线、卡片边框、输入框边框、命令展示框边框 |
+| **边框强化色** | `--agent-border-strong` | `#d6cdb6` (中卡其) | 聚焦状态边框、激活元素边框、弹窗投影边框 |
+| **文字主色** | `--agent-text` | `#3a2a1a` (深咖啡/深棕) | 正文字体、图标主色、终端指令文本 |
+| **文字副色** | `--agent-text-dim` | `#8b7a5d` (暖秋灰) | 辅助信息、时间戳、未激活按钮、账号占位文本 |
 | **主品牌色 (橙)** | `--agent-primary` | `#c0733a` (牛马橙棕) | 激活的项目树节点、发送图标、高亮提示 |
-| **草绿 (成功)** | `--agent-success` | `#5a8f3c` (抹茶绿) | 文件新增指标、审核通过按钮、正常状态 |
-| **砖红 (警示)** | `--agent-error` | `#c0392b` (暖砖红) | 文件删除指标、撤销操作按钮、报错状态 |
+| **草绿 (成功)** | `--agent-success` | `#5a8f3c` (抹茶绿) | 允许执行按钮、文件新增指标、审核通过按钮 |
+| **砖红 (警示)** | `--agent-error` | `#c0392b` (暖砖红) | 拒绝按钮、文件删除指标、撤销操作按钮 |
 
 ---
 
 ## 2. 主进程窗口配置优化 (Main Process Config)
 
-为了呈现一体化双栏，需在主进程中隐藏原生窗口标题栏，由前端来渲染可拖动区域。
+为了使 Electron 窗口呈现一体化双栏，需在主进程中将标题栏隐藏，由前端来渲染窗口拖拽区域，同时移除废弃的独立窗口逻辑。
 
 **修改文件**：`src/main/windows.ts`
+1. **隐藏聊天窗口原生标题栏**：
 ```diff
   const winOpts: Electron.BrowserWindowConstructorOptions = {
     width: saved?.width ?? 1020, // 双栏推荐宽度调整为 1020
@@ -88,52 +135,101 @@
     },
   }
 ```
+2. **废弃独立设置窗口的逻辑**：
+   - 彻底删除 `openSettingsWindow()` 与 `settingsWindow` 全局变量。
+   - 保留原主进程的 config ipc 通信处理器（`config-get` / `config-set` ），使同一窗口中的前端渲染可以直接通信。
 
 ---
 
-## 3. 前端组件重构详细方案 (Frontend Components Redesign)
+## 3. 前端页面框架与状态流重构 (`Chat.tsx`)
 
-### 3.1 页面主体布局调整
+**修改文件**：`src/renderer/src/pages/Chat.tsx`
+删除原有的抽屉，页面整体重构为 flex 双栏常驻布局，并通过 `currentView` 动态挂载右侧主视图：
 
-**修改文件**：`src/renderer/src/pages/Chat.tsx` 与 `src/renderer/src/pages/Chat.css`
-删除现有的 Project / Session 抽屉，页面整体重构为 flex 双栏常驻布局：
+```typescript
+import { useState } from 'react'
+import Sidebar from '../components/chat/Sidebar'
+import ChatHeader from '../components/chat/ChatHeader'
+import Settings from './Settings'
 
-```html
-<div className="codex-layout">
-  {/* 左侧侧边栏 (常驻) */}
-  <Sidebar
-    projects={projects}
-    currentProjectId={projectId}
-    currentSessionId={sessionId}
-    sessions={sessions}
-    onSwitchProject={switchProject}
-    onLoadSession={loadSession}
-    onNewSession={newSession}
-  />
+export default function Chat() {
+  const [currentView, setCurrentView] = useState<'chat' | 'settings'>('chat')
   
-  {/* 右侧主聊天区 */}
-  <div className="codex-main-pane">
-    <ChatHeader ... />
-    <MessageList ... />
-    <ChatFooter ... />
-  </div>
-</div>
+  // 切换项目或加载历史会话时，自动还原回聊天主界面
+  const handleLoadSession = (id: string) => {
+    setCurrentView('chat')
+    loadSession(id)
+  }
+  const handleSwitchProject = (id: string) => {
+    setCurrentView('chat')
+    switchProject(id)
+  }
+  const handleNewSession = () => {
+    setCurrentView('chat')
+    newSession()
+  }
+
+  return (
+    <div className="codex-layout">
+      {/* 左侧侧边栏 (常驻) */}
+      <Sidebar
+        projects={projects}
+        currentProjectId={projectId}
+        currentSessionId={sessionId}
+        sessions={sessions}
+        onSwitchProject={handleSwitchProject}
+        onLoadSession={handleLoadSession}
+        onNewSession={handleNewSession}
+        onOpenSettings={() => setCurrentView('settings')}
+      />
+      
+      {/* 右侧主显示区 */}
+      <div className="codex-main-pane">
+        {currentView === 'chat' ? (
+          <>
+            <ChatHeader ... />
+            <main className="chat__list" ...>
+              {/* 消息列表 */}
+            </main>
+            <footer className="chat__footer">
+              {/* 胶囊输入框 */}
+            </footer>
+          </>
+        ) : (
+          <>
+            {/* 顶栏附带“返回”操作 */}
+            <header className="pane-header">
+              <div className="pane-header__title">
+                <button className="settings-back-btn" onClick={() => setCurrentView('chat')}>◀ 返回聊天</button>
+                <span>设置中心</span>
+              </div>
+            </header>
+            <div className="settings-view-scroll">
+              <Settings />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
 ```
 
 ---
 
-### 3.2 左侧侧边栏设计 (Sidebar.tsx [NEW])
+## 4. 前端组件重构详细方案 (Components Redesign)
 
-**职责**：管理项目树形选择、历史会话与系统入口。
+### 4.1 左侧侧边栏组件 (Sidebar.tsx [NEW])
+
+**职责**：提供项目树级展示、独立对话展示、系统级入口、用户 profile 及账户菜单挂载。
 **物理路径**：`src/renderer/src/components/chat/Sidebar.tsx`
 
-#### 3.2.1 结构与布局细节
 1. **Header 导航控制区**：
-   - 包含 macOS 交通灯占位区（`-webkit-app-region: drag`，宽度 `80px`，使用该区域可拖拽窗口）。
+   - 包含 macOS 交通灯占位区（`-webkit-app-region: drag`，宽度 `80px`）。
    - 导航历史箭头（返回/前进，绑定路由或会话状态切换）。
    - 快捷动作组：
      - `新建对话`（触发 `newSession()`）
-     - `搜索`（过滤会话历史）
+     - `搜索`（全局会话搜索）
      - `插件`（原“🧩 技能”中心入口）
 2. **“项目 (Projects)” 树形折叠组**：
    - 遍历 `projects` 数组：
@@ -146,31 +242,28 @@
 4. **“对话 (Conversations)” 列表组**：
    - 展示不隶属于任何项目的独立快速对话（如 `Say hello`）。
 5. **用户 Profile 底部栏**：
-   - 显示圆形头像，用户名称 `jhxstudio`，等级标签 `Plus`。
-   - 右侧常驻 `齿轮[⚙]` 按钮，点击调用主进程 `openSettings()`。
+   - 显示圆形头像，用户名称 `jhxstudio`，等级标签 `Plus`。整个区域可点击以切换账户弹出菜单。
 
 ---
 
-### 3.3 右侧聊天头 (ChatHeader.tsx [NEW])
+### 4.2 右侧聊天头组件 (ChatHeader.tsx [NEW])
 
-**职责**：展示当前会话标题与全局模型控制。
 **物理路径**：`src/renderer/src/components/chat/ChatHeader.tsx`
 
-- **会话标题**：显示当前 Session Title，旁边附带 `...` 菜单，包含：重命名、归档、物理压缩（`/compact`）、删除会话。
-- **窗口可拖拽区**：中间空白区设置 `flex: 1` 和 `-webkit-app-region: drag`，以便双击或拖拽移动窗口。
+- **会话标题**：显示当前 Session Title，旁边附带 `...` 菜单（包含：重命名、归档、物理压缩 `/compact`、删除会话）。
+- **窗口可拖拽区**：中间空白区设置 `flex: 1` 和 `-webkit-app-region: drag`，方便双击或拖拽移动整个窗口。
 - **大模型选择器 (Model Dropdown)**：
-  - 圆角按钮，带有蓝色机器人/大脑图标，文字为当前预设（如 `5.5 超高` 或具体模型名称如 `DeepSeek-V3`）。
-  - 点击弹出浮层，展示常用模型白名单，可快捷写入 `llm_model` 配置。
+  - 药丸形圆角按钮，带有蓝色机器人/大脑图标，文字为当前模型预设（如 `5.5 超高` 或具体模型名称如 `DeepSeek-V3`）。
+  - 点击弹出浮层，展示常用模型白名单，点击后可快捷写入全局 `llm_model` 配置。
 - **分栏与侧边栏控制**：右侧常驻布局切换按钮，用于折叠/展开左侧侧边栏、开启多视窗调试等。
 
 ---
 
-### 3.4 消息渲染卡片化 (Message Elements Redesign)
+### 4.3 文件卡片组件 (FileCard.tsx [NEW])
 
-重点对消息列表中的 **“文件附件卡片”** 和 **“文件变更（Git Diff）卡片”** 进行高质感拟物化改造。
+**物理路径**：`src/renderer/src/components/chat/FileCard.tsx`
 
-#### 3.4.1 文件附件卡片 (FileCard.tsx [NEW])
-在 Agent 输出中若关联了特定文件，或者用户上传了附件，渲染为独立卡片形式。
+若大模型关联了特定文件，或者用户上传了附件，渲染为独立卡片形式。
 
 ```html
 <div className="codex-file-card">
@@ -189,10 +282,14 @@
   </div>
 </div>
 ```
-- **交互逻辑**：下拉菜单改变时，触发 Electron 本地打开动作（如调用主进程 `open_file` 工具）。
 
-#### 3.4.2 文件变更/提交审核卡片 (GitChangeBox.tsx [NEW])
-当 Agent 修改了项目中的文件后，会产生变更详情。在对话中以类似 Git 提交确认的卡片渲染。
+---
+
+### 4.4 文件变更审核卡片 (GitChangeBox.tsx [NEW])
+
+**物理路径**：`src/renderer/src/components/chat/GitChangeBox.tsx`
+
+Agent 修改项目文件后，在对话中以类似 Git 提交确认的卡片渲染。
 
 ```html
 <div className="codex-git-card">
@@ -230,31 +327,215 @@
 
 ---
 
-### 3.5 胶囊式浮动输入框 (CapsuleInput.tsx [NEW])
+### 4.5 胶囊式输入框组件 (CapsuleInput.tsx [NEW])
 
-**物理路径**：`src/renderer/src/pages/agent/AgentInput.tsx` (覆盖或替换为 `CapsuleInput.tsx`)
+**物理路径**：`src/renderer/src/pages/agent/CapsuleInput.tsx`
 
-放弃现有的贴底方形输入框，改为居中浮动的胶囊形设计。
+放弃贴底方形输入框，改为居中浮动的胶囊形设计。
 - **胶囊容器 (`.input-capsule-container`)**：
-  - 宽度：自适应或固定 `max-width: 760px`，在右侧聊天区底部居中浮动，带有轻微的 `box-shadow`。
-  - 圆角：`border-radius: 24px`，背景为 `#fffef0` (微黄乳白)，边框为 `1px solid #e5e0d1` (温暖浅卡其)。
+  - 宽度：`max-width: 760px`，在聊天区底部居中悬浮。
+  - 圆角：`border-radius: 24px`，背景为 `#fffef0`，边框为 `1px solid #e5e0d1`。
 - **输入区域 (`.input-capsule__textarea`)**：
-  - 占位符提示词改为 `"要求后续变更"`。
-  - 无边框，聚焦时无聚焦环，字体颜色 `#3a2a1a`，支持自动高度。
-- **底部工具条 (`.input-capsule__toolbar`)**：
-  - **左侧控制**：
-    - `+` 号圆圈按钮（添加附件，触发 `pickFiles`）。
-    - 药丸动作按钮（如：`帮我审批 ▾`，点击提供快捷预设 Slash 指令，如 `/plan`、`/compact`）。
-  - **右侧控制**：
-    - 推理/模型预设指示器（例如 `5.5 超高 ▾`，可快捷切换推理强度 `/effort`）。
-    - 麦克风图标 🎤（用于引导视觉美感）。
-    - 发送按钮：原型圆圈，背景 `#c0733a` (牛马橙棕)，中间为白色上箭头 `↑`。运行时替换为方块停止键 ⏹。
+  - 占位符为 `"要求后续变更"`，无边框、无聚焦环，支持自动高度。
+- **工具条 (`.input-capsule__toolbar`)**：
+  - **左侧**：`+` 附件按钮与药丸按钮（如：`帮我审批 ▾`，可快捷唤出 `/plan` 等指令）。
+  - **右侧**：推理强度指示器（如 `5.5 超高 ▾`），语音麦克风图标，牛马橙色发送按钮 `↑`。
 
 ---
 
-## 4. 样式表设计 (Tailored Theme CSS)
+## 5. 自定义命令确认弹窗设计 (Custom Dialog)
 
-在 `src/renderer/src/pages/Chat.css` 中引入新布局及组件的样式。所有颜色依旧使用 `--agent-*` 配色系。
+### 5.1 进程通信与安全模块重构
+
+#### 5.1.1 新增 IPC 信道定义
+在 `src/shared/ipc-channels.ts` 中定义主进程与渲染进程之间的命令确认桥梁：
+```typescript
+export const IPC = {
+  // ── 终端命令确认通道 ──────────────────────────
+  CHAT_CONFIRM_COMMAND:          'main:chat-confirm-command',          // 主进程向渲染进程请求确认命令
+  CHAT_CONFIRM_COMMAND_RESPONSE: 'renderer:chat-confirm-command-response' // 渲染进程将确认结果发回主进程
+}
+```
+
+#### 5.1.2 主进程安全拦截 (`security.ts`)
+重构主进程安全拦截函数 `confirmCommandWithUser`。优先向前端推送，仅在窗口不可用时才回退使用原生对话框。
+
+**修改文件**：`src/main/agent/security.ts`
+```typescript
+import { ipcMain } from 'electron'
+import { getChatWindow } from '../windows'
+import { IPC } from '@shared/ipc-channels'
+
+const pendingConfirmations = new Map<string, (allowed: boolean) => void>()
+
+export function registerConfirmCommandIPC(): void {
+  ipcMain.on(IPC.CHAT_CONFIRM_COMMAND_RESPONSE, (_e, payload: { id: string; allowed: boolean }) => {
+    const resolve = pendingConfirmations.get(payload.id)
+    if (resolve) {
+      pendingConfirmations.delete(payload.id)
+      resolve(payload.allowed)
+    }
+  })
+}
+
+async function doConfirmCommandWithUser(params: {
+  command: string
+  workDir?: string
+  timeoutMs: number
+}): Promise<boolean> {
+  const { command, workDir, timeoutMs } = params
+  const chatWin = getChatWindow()
+
+  // 1. 若聊天窗口已打开且处于显示状态，调用自定义 React 弹窗
+  if (chatWin && !chatWin.isDestroyed() && chatWin.isVisible()) {
+    const queryId = `confirm_cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    
+    return await new Promise<boolean>((resolve) => {
+      pendingConfirmations.set(queryId, resolve)
+      
+      chatWin.webContents.send(IPC.CHAT_CONFIRM_COMMAND, {
+        id: queryId,
+        command,
+        workDir,
+        timeoutMs
+      })
+
+      // 安全超时，防死锁
+      setTimeout(() => {
+        if (pendingConfirmations.has(queryId)) {
+          pendingConfirmations.delete(queryId)
+          resolve(false)
+        }
+      }, timeoutMs + 10000)
+    })
+  }
+
+  // 2. 窗口不存活时，安全回退原生对话框
+  return doNativeMessageBoxConfirm(params)
+}
+```
+
+---
+
+### 5.2 前端自定义命令确认弹窗设计 (`Modal.tsx`)
+
+**修改文件**：`src/renderer/src/components/Modal/Modal.tsx`
+
+1. **扩展类型定义**：
+```typescript
+interface ModalRequest {
+  id: number
+  kind: 'alert' | 'confirm' | 'prompt' | 'confirm-command'
+  title: string
+  message?: string
+  command?: string
+  workDir?: string
+  timeoutMs?: number
+  resolve: (value: boolean | string | null) => void
+}
+```
+
+2. **新增导出函数**：
+```typescript
+export function confirmCommand(command: string, workDir?: string, timeoutMs = 30000): Promise<boolean> {
+  return push({
+    kind: 'confirm-command',
+    title: '🤖 Agent 请求执行命令',
+    command,
+    workDir,
+    timeoutMs,
+    resolve: () => {}
+  }) as Promise<boolean>
+}
+```
+
+3. **在 `ModalDialog` 内部渲染指令确认区**：
+```typescript
+if (req.kind === 'confirm-command') {
+  return (
+    <div className="modal-overlay" onClick={handleCancel} role="dialog" aria-modal="true" aria-label={req.title}>
+      <div className="modal-panel modal-panel--command" onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <span className="modal-title">🤖 Agent 请求执行命令</span>
+          <button type="button" className="modal-close" onClick={handleCancel} aria-label="关闭">×</button>
+        </div>
+        
+        <div className="modal-command-meta">
+          <div className="meta-item">
+            <span className="meta-label">工作目录:</span>
+            <code className="meta-value" title={req.workDir}>{req.workDir || '项目根目录'}</code>
+          </div>
+          <div className="meta-item">
+            <span className="meta-label">超时限制:</span>
+            <span className="meta-value">{req.timeoutMs ? `${req.timeoutMs / 1000} 秒` : '无限制'}</span>
+          </div>
+        </div>
+
+        <div className="modal-command-box-wrapper">
+          <pre className="modal-command-pre">
+            <code>{req.command}</code>
+          </pre>
+          <button 
+            type="button" 
+            className="command-copy-btn" 
+            onClick={() => {
+              if (req.command) navigator.clipboard.writeText(req.command);
+            }}
+          >
+            复制
+          </button>
+        </div>
+
+        <div className="modal-command-warning">
+          ⚠️ 命令将在你本机执行。请务必审核核对，确认该操作安全再放行！
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="modal-btn modal-btn--cancel" onClick={handleCancel}>
+            拒绝
+          </button>
+          <button
+            type="button"
+            ref={confirmBtnRef}
+            className="modal-btn modal-btn--confirm-execute"
+            onClick={handleConfirm}
+          >
+            允许执行
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+```
+
+4. **绑定全局 IPC 侦听器 (`App.tsx`)**：
+```typescript
+import { confirmCommand } from './components/Modal/Modal'
+
+useEffect(() => {
+  const api = window.electronAPI
+  if (!api) return
+
+  const offConfirm = api.on(IPC.CHAT_CONFIRM_COMMAND, async (payload: { id: string; command: string; workDir?: string; timeoutMs: number }) => {
+    const allowed = await confirmCommand(payload.command, payload.workDir, payload.timeoutMs)
+    api.send(IPC.CHAT_CONFIRM_COMMAND_RESPONSE, {
+      id: payload.id,
+      allowed
+    })
+  })
+
+  return () => {
+    offConfirm()
+  }
+}, [])
+```
+
+---
+
+## 6. 样式表设计 (Tailored Theme CSS)
+
+在 `src/renderer/src/pages/Chat.css` 中引入新布局及组件的样式，所有颜色依旧使用 `--agent-*` 配色系。
 
 ```css
 /* ==========================================================================
@@ -275,9 +556,7 @@
   color: var(--agent-text); /* #3a2a1a */
 }
 
-/* ==========================================================================
-   Left Sidebar Styles
-   ========================================================================== */
+/* 左侧侧边栏 */
 .codex-sidebar {
   width: 260px;
   background-color: var(--sidebar-bg);
@@ -293,222 +572,127 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  /* 预留 macOS 交通灯控制区 */
-  padding-left: 80px; 
+  padding-left: 80px; /* 避让 macOS 交通灯 */
 }
 
-.sidebar-nav-arrow {
-  color: var(--agent-text-dim);
-  cursor: pointer;
-  padding: 4px;
-}
-.sidebar-nav-arrow:hover {
-  color: var(--agent-text);
-}
-
-.sidebar-action-items {
-  padding: 8px 16px;
+/* ==========================================================================
+   账户弹出浮层 (AccountPopover) Styles
+   ========================================================================== */
+.codex-account-popover {
+  position: absolute;
+  bottom: 60px;
+  left: 16px;
+  width: 220px;
+  background-color: var(--agent-panel);
+  border: 1px solid var(--agent-border-strong);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(58, 42, 26, 0.15);
+  z-index: 1000;
+  padding: 6px 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
 }
 
-.sidebar-action-btn {
+.popover-section {
   display: flex;
+  flex-direction: column;
+}
+
+.popover-divider {
+  height: 1px;
+  background-color: var(--agent-border);
+  margin: 6px 0;
+}
+
+.popover-email {
+  font-size: 11px;
+  color: var(--agent-text-dim);
+  padding: 4px 12px;
+  word-break: break-all;
+}
+
+.popover-item {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 10px;
   background: none;
   border: none;
-  color: var(--agent-text-dim);
+  color: var(--agent-text);
   width: 100%;
   text-align: left;
   padding: 8px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-}
-.sidebar-action-btn:hover {
-  background-color: var(--highlight-hover);
-  color: var(--agent-text);
-}
-
-/* 树形列表组 */
-.sidebar-tree-section {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px 8px;
-}
-
-.tree-section-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  color: var(--agent-text-dim);
-  padding: 8px 12px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-.project-folder-node {
-  padding: 6px 12px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  color: var(--agent-text);
   font-size: 13px;
-}
-.project-folder-node:hover {
-  background-color: var(--highlight-hover);
-}
-.project-folder-node.is-active {
-  background-color: var(--highlight-hover);
-  font-weight: 600;
-  border-left: 3px solid var(--agent-primary); /* 高亮左边条 */
+  text-decoration: none;
 }
 
-/* 激活项目下的 Task Sessions 展开项 */
-.project-sessions-sublist {
-  margin-left: 20px;
-  border-left: 1px solid var(--agent-border);
-  padding-left: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.popover-item.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
-.session-node-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 10px;
-  border-radius: 4px;
+.popover-item.is-clickable {
   cursor: pointer;
-  color: var(--agent-text-dim);
-  font-size: 13px;
 }
-.session-node-item:hover {
+.popover-item.is-clickable:hover {
   background-color: var(--highlight-hover);
-  color: var(--agent-text);
-}
-.session-node-item.is-selected {
-  background-color: var(--highlight-hover);
-  color: var(--agent-text);
 }
 
-.session-node-meta {
-  font-size: 11px;
-  color: var(--agent-text-dim);
-}
-
-/* 用户 Profile */
-.sidebar-user-panel {
-  padding: 16px;
-  border-top: 1px solid var(--agent-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background-color: var(--agent-panel-alt);
-}
-
-.user-panel__info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.user-panel__avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--agent-border-strong);
-  color: var(--agent-text);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
-}
-
-.user-panel__name-group {
-  display: flex;
-  flex-direction: column;
-}
-.user-panel__name {
-  font-size: 13px;
-  font-weight: 600;
-}
-.user-panel__tag {
+.popover-shortcut {
   font-size: 10px;
-  color: var(--agent-primary); /* Plus 标签高亮 */
-  font-weight: bold;
-}
-
-.user-panel__settings-btn {
-  background: none;
-  border: none;
   color: var(--agent-text-dim);
-  cursor: pointer;
-}
-.user-panel__settings-btn:hover {
-  color: var(--agent-text);
+  background-color: var(--agent-panel-alt);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--agent-border);
 }
 
 /* ==========================================================================
-   Right Main Pane Styles
+   嵌入式设置页面滚动适配 (Embed Settings View)
    ========================================================================== */
-.codex-main-pane {
+.settings-view-scroll {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
+  overflow-y: auto;
+  padding: 20px;
   background-color: var(--agent-bg);
 }
 
-/* 右侧标题头 */
-.pane-header {
-  height: 52px;
-  border-bottom: 1px solid var(--agent-border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
-  background-color: var(--agent-panel);
-}
-
-.pane-header__title {
-  font-size: 15px;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.pane-header__actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-/* 顶部的模型选择下拉按钮 */
-.model-dropdown-trigger {
+/* 返回聊天按钮 */
+.settings-back-btn {
   background-color: var(--agent-panel-alt);
   border: 1px solid var(--agent-border);
   color: var(--agent-text);
-  padding: 6px 12px;
-  border-radius: 16px;
+  padding: 4px 10px;
   font-size: 12px;
+  border-radius: 12px;
   cursor: pointer;
-  display: flex;
+  margin-right: 12px;
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
 }
-.model-dropdown-trigger:hover {
-  border-color: var(--agent-border-strong);
+.settings-back-btn:hover {
+  background-color: var(--highlight-hover);
+}
+
+/* 调整嵌入后设置页面的最大宽度 */
+.settings-view-scroll .settings-container {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 0;
+  background: none;
+}
+
+/* 确保保存栏在嵌入后表现良好 */
+.settings-view-scroll .settings-footer {
+  position: sticky;
+  bottom: 0;
+  background-color: var(--agent-bg);
+  padding: 12px 0;
+  border-top: 1px solid var(--agent-border);
+  margin-top: 20px;
 }
 
 /* ==========================================================================
-   卡片化 Message Elements
+   卡片化 Message Elements 与胶囊输入框 Styles
    ========================================================================== */
 /* 文件卡片 */
 .codex-file-card {
@@ -628,9 +812,7 @@
   color: var(--agent-text);
 }
 
-/* ==========================================================================
-   胶囊式浮动输入框 Styles
-   ========================================================================== */
+/* 胶囊输入框 */
 .input-capsule-container {
   position: absolute;
   bottom: 24px;
@@ -718,56 +900,133 @@
 .input-capsule__send-btn:hover {
   opacity: 0.9;
 }
+
+/* ==========================================================================
+   自定义命令确认弹窗 (Custom Modal) Styles
+   ========================================================================== */
+.modal-panel--command {
+  width: 580px;
+  max-width: 90vw;
+  background-color: var(--agent-panel); /* #fffef7 */
+  border: 1px solid var(--agent-border-strong);
+  box-shadow: 0 12px 36px rgba(58, 42, 26, 0.18);
+}
+
+.modal-command-meta {
+  padding: 8px 16px;
+  background-color: var(--agent-panel-alt); /* #fffef0 */
+  border: 1px solid var(--agent-border);
+  border-radius: 6px;
+  margin: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+}
+
+.meta-label {
+  color: var(--agent-text-dim);
+  width: 80px;
+}
+
+.meta-value {
+  color: var(--agent-text);
+  font-weight: 500;
+  font-family: var(--agent-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 440px;
+}
+
+.modal-command-box-wrapper {
+  position: relative;
+  margin: 12px 16px;
+  border: 1px solid var(--agent-border);
+  border-radius: 8px;
+  background-color: var(--agent-bg); /* 米黄底色 */
+  overflow: hidden;
+}
+
+.modal-command-pre {
+  margin: 0;
+  padding: 14px;
+  max-height: 250px;
+  overflow-y: auto;
+  font-family: var(--agent-mono);
+  font-size: 13px;
+  color: var(--agent-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.command-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background-color: var(--agent-panel-alt);
+  border: 1px solid var(--agent-border);
+  color: var(--agent-text);
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.command-copy-btn:hover {
+  opacity: 1;
+  border-color: var(--agent-border-strong);
+}
+
+.modal-command-warning {
+  margin: 8px 16px;
+  font-size: 12px;
+  color: var(--agent-error);
+  font-weight: 600;
+  background-color: rgba(192, 57, 43, 0.05);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--agent-error);
+}
+
+.modal-btn--confirm-execute {
+  background-color: var(--agent-success);
+  color: #ffffff;
+  border: none;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.modal-btn--confirm-execute:hover {
+  opacity: 0.9;
+}
 ```
 
 ---
 
-## 5. 对接状态与逻辑调整 (State & Logic Binding)
+## 7. 实施路线图与还原检查单 (Roadmap & Checklist)
 
-前端布局和 UI 切换后，状态层需做微调以支持双栏常驻操作。
+请按照以下顺序执行此部分的重构：
 
-### 5.1 项目列表与会话绑定
-1. **侧边栏加载会话时**：
-   - 现有的 `listChatSessions` 仅根据当前的 `projectId` 返回该项目的会话列表。
-   - 修改侧边栏状态流：侧边栏组件中不仅存储当前选中项目的 `sessions`，还需维护一个 `Record<string, ChatSessionMeta[]>`，在项目节点被折叠/展开时，按需调用 `listChatSessions({ projectId })` 加载缓存，以避免一次性加载所有项目会话造成卡顿。
-2. **新建会话归属项目绑定**：
-   - 侧边栏中点击某特定项目下的 `+` 快捷键，或者点击顶部的 `新建对话` 时，新建会话所绑定的 `projectId` 必须为当前侧边栏选中（激活）的项目的 `id`。
-
-### 5.2 撤销与审核操作的 IPC 绑定
-为了完美实现 Git 变更卡片中的 **“撤销”** 和 **“审核”** 操作：
-1. **撤销变更**：通过 IPC 通道向主进程发起请求，调用本地 git 回滚或用文件的备份覆盖，恢复代码变动。
-2. **审核变更**：标记该轮的修改已通过用户审批，通知后台 Agent 准备接受下一个指令或结束任务。
-
----
-
-## 6. 实施路线图与完美还原检查单 (Roadmap & Checklist)
-
-为了能够使用 Codex 或 Antigravity 完美实现该需求，请按以下步骤逐一执行：
-
-### Step 1: 基础配置与窗口设置
-- [ ] 修改 `src/main/windows.ts` 中的 `openChatWindow()`，加入 `titleBarStyle: 'hidden'`, `trafficLightPosition`。
-- [ ] 确保 `backgroundColor` 仍然设置为 `#f7f5ef` (米黄背景)。
-
-### Step 2: 编写侧边栏组件
-- [ ] 在 `src/renderer/src/components/chat/Sidebar.tsx` 创建侧边栏，完成项目、历史会话以及用户 Profile 的 UI。
-- [ ] 支持点击切换项目、点击加载会话、双击折叠逻辑。
-- [ ] 使用 `var(--sidebar-bg)` （`#ede9de`）作为背景色，字体使用 `var(--agent-text)` 咖啡色。
-
-### Step 3: 重构 Chat.tsx 入口与头部
-- [ ] 重构 `Chat.tsx` 页面，将顶层包裹层替换为双栏布局 `<div className="codex-layout">`。
-- [ ] 移除旧的 `ProjectsDrawer` 与 `SessionsDrawer` 抽屉。
-- [ ] 实现顶部的模型选择下拉按钮，集成当前 `llm_model` 的查询与设置。
-
-### Step 4: 文件与变更审核卡片实现
-- [ ] 封装 `<FileCard>` 组件，支持点击调用本地打开。
-- [ ] 封装 `<GitChangeBox>` 组件，显示文件列表、变化行数，并注册撤销/审核对应的按钮事件。
-- [ ] 修改 `MessageItem` 渲染判断逻辑：若发现助理回复包含文件属性，或带有变更元数据，自动升级渲染为对应的 Codex 式温暖拟物卡片。
-
-### Step 5: 胶囊输入框替换
-- [ ] 用 `<CapsuleInput>` 组件替换现有的 `<AgentInput>`。
-- [ ] 还原其浮动胶囊外观、下方的药丸指令快捷键、模型与推理强度切换状态。背景使用 `#fffef0`。
-
-### Step 6: 样式打磨与回归测试
-- [ ] 导入 `Chat.css` 的新 CSS 配置，确保与米黄暖色风格高度统一。
-- [ ] 检验并修复拖拽移动、透明点击穿透（小猫和气泡）在无边框一体化窗口下的表现。
-- [ ] 确认快捷键（如 `⌘9` 等）与侧边栏选中态完全同步。
+- [ ] **Step 1: 移除独立窗口注册**：清理 `src/main/windows.ts` 中的 `openSettingsWindow()` 与 `settingsWindow` 全局对象，确保设置界面不会再新开独立 Electron 窗口。
+- [ ] **Step 2: 状态机与视图绑定**：在 `Chat.tsx` 引入 `currentView` 状态，替换右侧渲染支路，并在切换会话、切换项目和新建会话时，自动回调将 `currentView` 切回 `'chat'`。
+- [ ] **Step 3: 实现嵌入式 Settings**：重写设置页面装载方式，限制其 CSS 溢出为 `.settings-view-scroll` 内滚动，并设计顶部的 `◀ 返回聊天` 返回条。
+- [ ] **Step 4: 编写 Sidebar 用户账户菜单**：
+  - [ ] 在 `Sidebar.tsx` 的 Profile 头像卡片注册 `onClick`，展示绝对定位的浮层 `showAccountPopover`。
+  - [ ] 预留置灰 `jhxlovelmm@gmail.com`、`个人帐户`、`个人资料`。
+  - [ ] 绑定 `设置` 选项，触发 `onOpenSettings`，并在全局监听 `Cmd+,` / `Ctrl+,` 快捷键，将页面推入设置视图。
+- [ ] **Step 5: 自定义指令确认桥接与渲染**：
+  - [ ] 在主进程 `security.ts` 完成 `CHAT_CONFIRM_COMMAND` 桥接逻辑，增加对 `chatWindow` 活跃度校验与安全超时定时器。
+  - [ ] 扩展 `Modal.tsx` 数据结构，并在 `ModalDialog` 中编写 `confirm-command` 对应的渲染代码，支持超长指令限高滚动和一键复制。
+  - [ ] 在前端入口绑定 `trigger` 回调反馈，以完成敏感指令的阻拦确认。
+- [ ] **Step 6: 样式打磨与回归测试**：
+  - [ ] 导入 `Chat.css` 的新 CSS 变量与主题颜色，删除旧的抽屉和单栏排版样式。
+  - [ ] 校验并修复拖拽移动、透明点击穿透（小猫和气泡）在无边框一体化窗口下的表现。
+  - [ ] 确认快捷键（如 `⌘9` 等）与侧边栏选中态完全同步。

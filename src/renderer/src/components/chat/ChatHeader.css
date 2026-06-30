@@ -1,0 +1,58 @@
+/* ChatHeader component styles — extracted from inline styles */
+
+/* Context ring wrapper */
+.context-ring-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  margin-right: 4px;
+}
+
+/* Token popover */
+.codex-header__token-popover {
+  position: absolute;
+  top: 26px;
+  left: 0;
+  width: 180px;
+  background-color: var(--agent-panel, #fffef7);
+  border: 1px solid var(--agent-border-strong, #d6cdb6);
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(58, 42, 26, 0.15);
+  z-index: 1001;
+  padding: 10px 12px;
+  color: var(--agent-text, #3a2a1a);
+  cursor: default;
+}
+
+.token-popover__title {
+  font-size: 11px;
+  color: var(--agent-text-dim, #8b7a5d);
+  font-weight: bold;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--agent-border, #e5e0d1);
+  padding-bottom: 4px;
+}
+
+.token-popover__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+.token-popover__label {
+  color: var(--agent-text-dim, #8b7a5d);
+}
+
+.token-popover__value {
+  font-weight: 600;
+  font-family: var(--agent-mono, monospace);
+  font-size: 12px;
+}
+
+.token-popover__value--accent {
+  color: var(--agent-primary, #c0733a);
+}

@@ -245,19 +245,12 @@ function createOrFocusSubWindow(
   return win
 }
 
-// ── 设置窗口 ───────────────────────────────────
+// ── 设置窗口（已弃用独立窗口，重定向到主聊天窗口内部路由） ──
 export function openSettingsWindow(): void {
-  createOrFocusSubWindow(
-    {
-      hash: '/settings',
-      title: '小小牛马 - 设置',
-      width: 520,
-      height: 720,
-      resizable: false,
-    },
-    () => settingsWindow,
-    (win) => { settingsWindow = win }
-  )
+  openChatWindow()
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow.webContents.send('main:open-settings-view')
+  }
 }
 
 // ── 日志查看窗口 ──────────────────────────────────
@@ -305,13 +298,15 @@ export function openChatWindow(): void {
 
   const saved = getConfig().chat_window_bounds
   const winOpts: Electron.BrowserWindowConstructorOptions = {
-    width: saved?.width ?? 820,
-    height: saved?.height ?? 700,
-    minWidth: 560,
-    minHeight: 500,
+    width: saved?.width ?? 1020,
+    height: saved?.height ?? 750,
+    minWidth: 800,
+    minHeight: 550,
     title: '小小牛马 · 对话',
     resizable: true,
     backgroundColor: '#f7f5ef',
+    titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 18, y: 18 },
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,

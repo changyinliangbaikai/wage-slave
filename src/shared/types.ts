@@ -69,7 +69,7 @@ export interface AppConfig {
    * Agent LLM 推理强度（reasoning_effort）：仅对支持推理参数的模型生效（如 o1 / o3 / gpt-5 等）
    * 取值：'low' / 'medium' / 'high'；空字符串或缺省表示不发送该参数
    */
-  agent_reasoning_effort?: 'low' | 'medium' | 'high' | ''
+  agent_reasoning_effort?: 'low' | 'medium' | 'high' | 'max' | ''
   /**
    * Agent 上下文窗口上限（tokens）：用户自定义模型上下文长度。
    *  - 0 或未设置：按模型名自动推断（见 model-info.ts）
@@ -173,6 +173,8 @@ export interface AIChatStats {
   totalDurationMs: number
   /** 是否来自 API usage 字段（true=精确，false=本地估算） */
   fromApiUsage: boolean
+  /** 缓存命中的 token 数（可选） */
+  cacheHitTokens?: number
 }
 
 /** 流式增量推送的载荷（main -> renderer） */
@@ -574,6 +576,7 @@ export interface AgentMessage {
     completionTokens?: number
     totalTokens?: number
     maxTokens?: number
+    cacheHitTokens?: number
   }
   /** 创建时间（毫秒） */
   createdAt: number

@@ -14,10 +14,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { IPC } from '@shared/ipc-channels'
+import { isOutputLimitContinuationPrompt } from '@shared/output-limit-continuation'
 import type {
   ChatMessage,
   ChatSession,
   ChatSessionMeta,
+  ChatSearchHit,
   ChatChunkPayload,
   ChatToolEventPayload,
   ChatDonePayload,
@@ -82,6 +84,8 @@ export interface UseChatResult {
   running: boolean
   fatalError: string | null
   currentTool: string | null
+  /** 最近一次对话完成的时间戳，用于外部刷新会话列表 */
+  doneAt: number
   sendMessage: (content: string, attachments?: AIChatAttachment[]) => Promise<void>
   stopGeneration: () => Promise<void>
   newSession: () => void
@@ -106,6 +110,7 @@ export function useChat(): UseChatResult {
   const [running, setRunning] = useState(false)
   const [fatalError, setFatalError] = useState<string | null>(null)
   const [currentTool, setCurrentTool] = useState<string | null>(null)
+  const [doneAt, setDoneAt] = useState(0)
 
   // 事件回调里读最新值，避免闭包陷阱
   const sessionIdRef = useRef(sessionId)
@@ -115,26 +120,46 @@ export function useChat(): UseChatResult {
   useEffect(() => { projectIdRef.current = projectId }, [projectId])
   useEffect(() => { messagesRef.current = messages }, [messages])
 
-  // ── Agent：按 iteration 维护流式 assistant ──
-  const upsertStreamingAssistant = useCallback((iteration: number, content: string, reasoning: string) => {
+  // ── 流式节流：缓冲最新内容，定时刷新到 state，避免高频 setMessages 卡死渲染 ──
+  const streamingBufferRef = useRef<{ iteration: number; content: string; reasoning: string } | null>(null)
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 立即刷新缓冲区到 state（用于工具事件/完成事件前确保不丢内容）
+  const flushStreamingNow = useCallback(() => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+    }
+    const buf = streamingBufferRef.current
+    if (!buf) return
+    streamingBufferRef.current = null
     setMessages(prev => {
       const last = prev[prev.length - 1]
-      if (last?.role === 'assistant' && last.iteration === iteration && last.streaming) {
-        return [...prev.slice(0, -1), { ...last, content, reasoning }]
+      if (last?.role === 'assistant' && last.iteration === buf.iteration && last.streaming) {
+        return [...prev.slice(0, -1), { ...last, content: buf.content, reasoning: buf.reasoning }]
       }
+      const closedPrev = prev.map(m => (m.streaming ? { ...m, streaming: false } : m))
       const next: UIChatMessage = {
         id: genId('asst'),
         role: 'assistant',
-        content,
-        reasoning: reasoning || undefined,
+        content: buf.content,
+        reasoning: buf.reasoning || undefined,
         createdAt: Date.now(),
         toolRuns: [],
         streaming: true,
-        iteration,
+        iteration: buf.iteration,
       }
-      return [...prev, next]
+      return [...closedPrev, next]
     })
   }, [])
+
+  // ── Agent：按 iteration 维护流式 assistant（节流 50ms）──
+  const upsertStreamingAssistant = useCallback((iteration: number, content: string, reasoning: string) => {
+    streamingBufferRef.current = { iteration, content, reasoning }
+    if (flushTimerRef.current === null) {
+      flushTimerRef.current = setTimeout(flushStreamingNow, 50)
+    }
+  }, [flushStreamingNow])
 
   const attachToolRuns = useCallback((iteration: number, toolCalls: NonNullable<ChatToolEventPayload['toolCalls']>) => {
     const newRuns: ToolRunUI[] = toolCalls.map(tc => ({
@@ -219,6 +244,8 @@ export function useChat(): UseChatResult {
 
   const newSession = useCallback(() => {
     if (running) return
+    if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null }
+    streamingBufferRef.current = null
     setSessionId(genSessionId())
     setMessages([])
     setFatalError(null)
@@ -235,6 +262,8 @@ export function useChat(): UseChatResult {
       return
     }
     if (!session) return
+    if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null }
+    streamingBufferRef.current = null
     setSessionId(id)
     // 加载历史时自动切换到会话归属的项目
     if (session.projectId) setProjectId(session.projectId)
@@ -246,6 +275,8 @@ export function useChat(): UseChatResult {
   /** 切换项目：清空当前会话状态，新建一个属于目标项目的会话 */
   const switchProject = useCallback((next: string) => {
     if (running || !next || next === projectIdRef.current) return
+    if (flushTimerRef.current) { clearTimeout(flushTimerRef.current); flushTimerRef.current = null }
+    streamingBufferRef.current = null
     setProjectId(next)
     setSessionId(genSessionId())
     setMessages([])
@@ -379,6 +410,8 @@ ${arg || '(空)'}`
     const offTool = api.on(IPC.CHAT_TOOL_EVENT, ((p: ChatToolEventPayload) => {
       if (!mine(p.sessionId)) return
       if (p.phase === 'start' && typeof p.iteration === 'number' && p.toolCalls) {
+        // 工具开始前立即刷新流式缓冲，确保最后一波内容不丢失
+        flushStreamingNow()
         // 截断 Bug 修复：进入工具执行阶段时，立刻把上一轮 streaming 状态关闭，
         // 同时把本轮 LLM 的 tokenUsage 写入对应 assistant 的 metadata（用于上下文进度条）
         const iter = p.iteration
@@ -394,6 +427,7 @@ ${arg || '(空)'}`
               completionTokens: tu.completionTokens,
               totalTokens: tu.totalTokens,
               maxTokens: tu.maxTokens,
+              cacheHitTokens: tu.cacheHitTokens,
             }
           }
           return next
@@ -415,8 +449,11 @@ ${arg || '(空)'}`
 
     const offDone = api.on(IPC.CHAT_DONE, ((p: ChatDonePayload) => {
       if (!mine(p.sessionId)) return
+      // 完成事件前立即刷新流式缓冲
+      flushStreamingNow()
       setRunning(false)
       setCurrentTool(null)
+      setDoneAt(Date.now())
       setMessages(prev => prev.map((m, idx) => {
         // 收尾最后一条 streaming assistant；把最终的 tokenUsage 合并入 metadata
         const isTarget = idx === prev.length - 1 && m.role === 'assistant' && m.streaming
@@ -430,6 +467,7 @@ ${arg || '(空)'}`
               completionTokens: tu.completionTokens,
               totalTokens: tu.totalTokens,
               maxTokens: tu.maxTokens,
+              cacheHitTokens: tu.cacheHitTokens,
             }
           : m.metadata
         return { ...m, streaming: false, content: p.content || m.content, reasoning: p.reasoning ?? m.reasoning, metadata: mergedMeta }
@@ -447,11 +485,14 @@ ${arg || '(空)'}`
       }
     }) as (...a: unknown[]) => void)
 
-    return () => { offChunk(); offTool(); offDone(); offError() }
-  }, [upsertStreamingAssistant, attachToolRuns, updateToolRun])
+    return () => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
+      offChunk(); offTool(); offDone(); offError()
+    }
+  }, [upsertStreamingAssistant, attachToolRuns, updateToolRun, flushStreamingNow])
 
   return {
-    sessionId, projectId, messages, running, fatalError, currentTool,
+    sessionId, projectId, messages, running, fatalError, currentTool, doneAt,
     sendMessage, stopGeneration, newSession, loadSession, switchProject,
     runSlashCommand, regenerate,
   }
@@ -519,6 +560,24 @@ export async function pickProjectDir(): Promise<string | null> {
   }
 }
 
+export async function togglePinProject(id: string): Promise<boolean> {
+  try {
+    const res = (await api.invoke(IPC.PROJECT_TOGGLE_PIN, id)) as { ok: boolean }
+    return Boolean(res?.ok)
+  } catch {
+    return false
+  }
+}
+
+export async function showProjectInExplorer(id: string): Promise<boolean> {
+  try {
+    const res = (await api.invoke(IPC.PROJECT_SHOW_IN_EXPLORER, id)) as { ok: boolean }
+    return Boolean(res?.ok)
+  } catch {
+    return false
+  }
+}
+
 // ─────────────────────────────────────────────
 // /compact 永久压缩当前会话
 // ─────────────────────────────────────────────
@@ -558,12 +617,14 @@ function projectMessagesToUI(messages: ChatMessage[]): UIChatMessage[] {
   const ui: UIChatMessage[] = []
   const toolResult = new Map<string, { output?: string; error?: string }>()
   for (const m of messages) {
+    if (isOutputLimitContinuationPrompt(m)) continue
     if (m.role === 'tool' && m.tool_call_id) {
       const isErr = m.content.startsWith('[ERROR]')
       toolResult.set(m.tool_call_id, isErr ? { error: m.content.slice(7).trim() } : { output: m.content })
     }
   }
   for (const m of messages) {
+    if (isOutputLimitContinuationPrompt(m)) continue
     if (m.role === 'tool') continue
     if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
       const toolRuns: ToolRunUI[] = m.tool_calls.map(tc => {
@@ -615,5 +676,14 @@ export async function deleteChatSession(id: string): Promise<boolean> {
     return Boolean(res?.ok)
   } catch {
     return false
+  }
+}
+
+/** 全文搜索会话（标题 + 消息内容） */
+export async function searchChatSessions(query: string): Promise<ChatSearchHit[]> {
+  try {
+    return (await api.invoke(IPC.CHAT_SEARCH, query)) as ChatSearchHit[]
+  } catch {
+    return []
   }
 }

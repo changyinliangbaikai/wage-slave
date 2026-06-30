@@ -28,7 +28,8 @@
 import log from 'electron-log/main'
 import type { AgentMessage } from '@shared/types'
 import { getConfig } from '../store'
-import { detectModelFamily, type ModelFamily } from './model-info'
+import { detectModelFamily, inferModelContextWindow, type ModelFamily } from './model-info'
+import { scaleCompressionConfigForContextWindow } from './prompt-cache-policy'
 
 /** 压缩配置 */
 export interface CompressConfig {
@@ -79,6 +80,7 @@ export function getCompressConfig(): CompressConfig {
   // agent_llm_model 为空时回退到 llm_model（主聊天模型）
   const model = cfg.agent_llm_model || cfg.llm_model
   const family = detectModelFamily(model)
+  const contextWindow = inferModelContextWindow()
 
   // 大窗口模型族（128k+ 上下文）：GPT-4o / Claude / Gemini / Qwen-Max / Moonshot
   const LARGE_WINDOW_FAMILIES: ReadonlySet<ModelFamily> = new Set<ModelFamily>([
@@ -86,7 +88,7 @@ export function getCompressConfig(): CompressConfig {
   ])
 
   if (family === 'deepseek') {
-    return {
+    return scaleCompressionConfigForContextWindow({
       keepRecent: 20,
       maxToolChars: 8000,
       keepRecentTools: 6,
@@ -94,11 +96,11 @@ export function getCompressConfig(): CompressConfig {
       triggerLevel2Chars: 48000,
       triggerLevel3Chars: 80000,
       triggerCount: 50,
-    }
+    }, contextWindow, 64_000)
   }
 
   if (LARGE_WINDOW_FAMILIES.has(family)) {
-    return {
+    return scaleCompressionConfigForContextWindow({
       keepRecent: 24,
       maxToolChars: 12000,
       keepRecentTools: 8,
@@ -106,10 +108,10 @@ export function getCompressConfig(): CompressConfig {
       triggerLevel2Chars: 64000,
       triggerLevel3Chars: 96000,
       triggerCount: 60,
-    }
+    }, contextWindow, 128_000)
   }
 
-  return DEFAULT_CONFIG
+  return scaleCompressionConfigForContextWindow(DEFAULT_CONFIG, contextWindow, 32_768)
 }
 
 /**

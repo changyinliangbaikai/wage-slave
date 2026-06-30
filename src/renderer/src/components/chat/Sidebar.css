@@ -1,0 +1,279 @@
+/* Sidebar component styles — extracted from inline styles */
+
+/* Tree section title with action buttons */
+.sidebar-tree-section-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* Add project button */
+.sidebar-add-project-btn {
+  background: none;
+  border: none;
+  font-size: 16px;
+  font-weight: bold;
+  color: var(--agent-text-dim, #8b7a5d);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.sidebar-add-project-btn:hover {
+  color: var(--agent-primary, #c0733a);
+  background-color: rgba(192, 115, 58, 0.08);
+}
+
+/* Collapse all button */
+.sidebar-collapse-all-btn {
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: var(--agent-text-dim, #8b7a5d);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.2s;
+}
+.sidebar-collapse-all-btn:hover {
+  color: var(--agent-primary, #c0733a);
+}
+
+/* Add chat button */
+.sidebar-add-chat-btn {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--agent-text-dim, #8b7a5d);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+/* Project tree node */
+.project-tree-node {
+  position: relative;
+}
+
+/* Project folder node layout */
+.project-folder-node {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: relative;
+}
+
+.project-folder-node__main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.project-folder-icon {
+  flex-shrink: 0;
+}
+
+.project-folder-name {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.project-folder-pinned {
+  font-size: 10px;
+  color: var(--agent-primary, #c0733a);
+  flex-shrink: 0;
+}
+
+.project-folder-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Project action trigger — show when menu active */
+.project-action-trigger-btn.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Session node empty — standalone variant */
+.session-node-empty--standalone {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--agent-text-dim);
+}
+
+/* Session node empty — project variant */
+.session-node-empty--project {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--agent-text-dim);
+}
+
+/* Standalone section title margin */
+.sidebar-standalone-title {
+  margin-top: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+/* User panel wrapper */
+.sidebar-user-panel-wrapper {
+  position: relative;
+}
+
+/* Disabled popover sections */
+.popover-section.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.popover-item.is-disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* ── 搜索面板 ────────────────────────────────── */
+
+.sidebar-search-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar-search-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--agent-border, #e5e0d1);
+}
+
+.sidebar-search-back {
+  background: none;
+  border: none;
+  font-size: 14px;
+  color: var(--agent-text-dim, #8b7a5d);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.sidebar-search-back:hover {
+  color: var(--agent-text, #3a2a1a);
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+.sidebar-search-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--agent-border, #e5e0d1);
+  border-radius: 6px;
+  font-size: 13px;
+  background-color: var(--agent-panel, #fffef7);
+  color: var(--agent-text, #3a2a1a);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.sidebar-search-input:focus {
+  border-color: var(--agent-primary, #c0733a);
+}
+
+.sidebar-search-clear {
+  background: none;
+  border: none;
+  font-size: 13px;
+  color: var(--agent-text-dim, #8b7a5d);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.sidebar-search-clear:hover {
+  color: var(--agent-text, #3a2a1a);
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+.sidebar-search-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 6px;
+}
+
+.sidebar-search-status {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--agent-text-dim, #8b7a5d);
+  text-align: center;
+}
+
+.sidebar-search-count {
+  padding: 4px 12px 8px;
+  font-size: 11px;
+  color: var(--agent-text-dim, #8b7a5d);
+  font-weight: 600;
+}
+
+.sidebar-search-result-item {
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: background 0.12s;
+}
+.sidebar-search-result-item:hover {
+  background-color: #e2dcd0;
+}
+.sidebar-search-result-item.is-selected {
+  background-color: var(--agent-panel, #fffef7);
+  border: 1px solid var(--agent-border, #e5e0d1);
+}
+
+.sidebar-search-result-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--agent-text, #3a2a1a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 2px;
+}
+
+.sidebar-search-result-snippet {
+  font-size: 11.5px;
+  color: var(--agent-text-dim, #8b7a5d);
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  margin-bottom: 4px;
+}
+
+.sidebar-search-result-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--agent-text-dim, #8b7a5d);
+}
+
+.sidebar-search-result-hits {
+  color: var(--agent-primary, #c0733a);
+  font-weight: 600;
+}

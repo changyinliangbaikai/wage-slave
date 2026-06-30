@@ -152,7 +152,7 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
 
   // 可选的 reasoning_effort：仅对支持的模型生效，留空时不发送
   const effort = config.agent_reasoning_effort
-  if (effort === 'low' || effort === 'medium' || effort === 'high') {
+  if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'max') {
     body.reasoning_effort = effort
   }
 

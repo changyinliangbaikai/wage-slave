@@ -86,7 +86,19 @@ export function initProjectStore(): void {
 export function listProjects(): Project[] {
   const list = readJSON<Project[]>(PROJECTS_FILE, [])
   if (!Array.isArray(list)) return []
-  return [...list].sort((a, b) => a.createdAt - b.createdAt)
+  return [...list].sort((a, b) => {
+    if (a.id === DEFAULT_PROJECT_ID) return -1
+    if (b.id === DEFAULT_PROJECT_ID) return 1
+
+    const aPinned = !!a.pinned
+    const bPinned = !!b.pinned
+    if (aPinned && !bPinned) return -1
+    if (!aPinned && bPinned) return 1
+    if (aPinned && bPinned) {
+      return (b.pinnedAt || 0) - (a.pinnedAt || 0)
+    }
+    return a.createdAt - b.createdAt
+  })
 }
 
 /** 按 id 读取单个项目 */
@@ -182,4 +194,22 @@ export function deleteProject(id: string): boolean {
 function sanitizeDirName(name: string): string {
   const cleaned = name.replace(/[\\/:*?"<>|]/g, '_').trim()
   return cleaned.slice(0, 32) || 'project'
+}
+
+/** 置顶/取消置顶项目 */
+export function togglePinProject(id: string): boolean {
+  if (id === DEFAULT_PROJECT_ID) return false
+  const list = readJSON<Project[]>(PROJECTS_FILE, [])
+  const idx = list.findIndex(p => p.id === id)
+  if (idx === -1) return false
+  const project = list[idx]
+  const pinned = !project.pinned
+  list[idx] = {
+    ...project,
+    pinned,
+    pinnedAt: pinned ? Date.now() : undefined,
+  }
+  atomicWrite(PROJECTS_FILE, list)
+  log.info(`[ProjectStore] 项目置顶状态切换 id=${id} pinned=${pinned}`)
+  return true
 }

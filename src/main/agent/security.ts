@@ -11,11 +11,13 @@
  *  - 用 app.getPath() 与 os.homedir() 派生标准目录
  */
 
-import { app, BrowserWindow, dialog } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import * as os from 'os'
 import * as path from 'path'
 import { getConfig } from '../store'
 import { listProjects } from '../chat/project-store'
+import { getChatWindow } from '../windows'
+import { IPC } from '@shared/ipc-channels'
 
 /**
  * 获取 Agent 允许访问的路径白名单（绝对路径前缀）
@@ -237,19 +239,19 @@ export const DANGEROUS_RULES: ReadonlyArray<DangerousRule> = [
 
 /** 命令安全检查结果 */
 export interface CommandCheckResult {
-  /** 是否允许进入二次确认（true=允许，false=直接拒绝） */
+  /** 是否为安全命令（true=安全，可直接执行；false=命中风险规则，需用户确认） */
   allowed: boolean
-  /** 拒绝原因（仅当 allowed=false） */
+  /** 风险原因（仅当 allowed=false） */
   reason?: string
   /** 命中的危险规则原文（调试用） */
   matchedPattern?: string
 }
 
 /**
- * 检查命令是否被黑名单拦截
+ * 检查命令是否命中风险规则（黑名单）
  *
- * 注意：通过本检查 ≠ 直接执行。run_command 工具还需要经过 confirmCommandWithUser
- * 让用户人工确认。黑名单只是"硬拒绝"层，再加一层人工确认是最终保险。
+ * - allowed=true：安全命令，可直接执行
+ * - allowed=false：命中风险规则，需弹窗让用户确认后再执行
  */
 export function checkCommand(command: string): CommandCheckResult {
   if (!command || typeof command !== 'string') {
@@ -287,6 +289,20 @@ export function isCommandSafe(command: string): boolean {
  *
  * @returns 用户允许执行返回 true；拒绝或关闭对话框返回 false
  */
+// 存储挂起的确认回调函数
+const pendingConfirmations = new Map<string, (allowed: boolean) => void>()
+
+// 注册 IPC 监听响应渲染进程的选择
+export function registerConfirmCommandIPC(): void {
+  ipcMain.on(IPC.CHAT_CONFIRM_COMMAND_RESPONSE, (_e, payload: { id: string; allowed: boolean }) => {
+    const resolve = pendingConfirmations.get(payload.id)
+    if (resolve) {
+      pendingConfirmations.delete(payload.id)
+      resolve(payload.allowed)
+    }
+  })
+}
+
 // 确认队列：同一时刻只允许一个确认框展示，后续请求排队等待
 let confirmQueue: Promise<boolean> = Promise.resolve(true)
 
@@ -294,6 +310,7 @@ export async function confirmCommandWithUser(params: {
   command: string
   workDir?: string
   timeoutMs: number
+  reason?: string
 }): Promise<boolean> {
   // 串行化：把本次确认挂到上一个确认的 then 链后，确保前一个对话框关闭后才弹下一个
   // catch 兜底：即使 doConfirm 抛异常（如父窗口销毁），也返回 false 并保持队列链不断
@@ -309,20 +326,58 @@ export async function confirmCommandWithUser(params: {
   return confirmQueue
 }
 
-/** 实际弹出确认框的实现（不直接对外暴露，请用 confirmCommandWithUser 走队列） */
+/** 实际弹出确认框的实现 */
 async function doConfirmCommandWithUser(params: {
   command: string
   workDir?: string
   timeoutMs: number
+  reason?: string
 }): Promise<boolean> {
-  const { command, workDir, timeoutMs } = params
+  const { command, workDir, timeoutMs, reason } = params
+  const chatWin = getChatWindow()
 
-  // 选择父窗口：优先聚焦窗口，否则任一可见窗口
+  // 1. 若对话窗口已打开且处于显示状态，调用自定义 React 弹窗
+  if (chatWin && !chatWin.isDestroyed() && chatWin.isVisible()) {
+    const queryId = `confirm_cmd_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    
+    const allowed = await new Promise<boolean>((resolve) => {
+      pendingConfirmations.set(queryId, resolve)
+      
+      chatWin.webContents.send(IPC.CHAT_CONFIRM_COMMAND, {
+        id: queryId,
+        command,
+        workDir,
+        timeoutMs,
+        reason,
+      })
+
+      // 安全超时，防死锁
+      setTimeout(() => {
+        if (pendingConfirmations.has(queryId)) {
+          pendingConfirmations.delete(queryId)
+          resolve(false)
+        }
+      }, timeoutMs + 10000)
+    })
+
+    return allowed
+  }
+
+  // 2. 窗口不存活时，安全回退原生对话框
+  return doNativeMessageBoxConfirm(params)
+}
+
+/** 原生 Electron 对话框确认（防死锁兜底） */
+async function doNativeMessageBoxConfirm(params: {
+  command: string
+  workDir?: string
+  timeoutMs: number
+  reason?: string
+}): Promise<boolean> {
+  const { command, workDir, timeoutMs, reason } = params
   const focused = BrowserWindow.getFocusedWindow()
   const visible = BrowserWindow.getAllWindows().find(w => w.isVisible() && !w.isDestroyed())
   const parentWin = focused ?? visible ?? null
-
-  console.log('[Agent.security] 请求用户确认命令执行:', command)
 
   const showOpts = {
     type: 'warning' as const,
@@ -330,12 +385,13 @@ async function doConfirmCommandWithUser(params: {
     message: '🤖 Agent 想要执行下面的命令，请确认',
     detail:
       `命令：\n${command}\n\n` +
+      (reason ? `风险提示：${reason}\n\n` : '') +
       `工作目录：${workDir ?? '默认'}\n` +
       `超时：${(timeoutMs / 1000).toFixed(0)} 秒\n\n` +
       '⚠️ 命令将在你本机执行。如果不确定其行为，请点【拒绝】。',
     buttons: ['拒绝', '允许执行'],
-    defaultId: 0,   // 默认聚焦"拒绝"
-    cancelId: 0,    // ESC / 关闭对话框 = 拒绝
+    defaultId: 0,
+    cancelId: 0,
     noLink: true,
   }
 

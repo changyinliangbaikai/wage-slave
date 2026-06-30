@@ -69,6 +69,22 @@ export function registerChatIPC(): void {
       active.delete(sessionId)
     }
 
+    // 立即创建占位会话写入磁盘，让渲染进程 sidebar 能马上看到新会话
+    const now = Date.now()
+    const placeholderTitle = params.userInput.trim().slice(0, 24) || '新会话'
+    const placeholderPreview = params.userInput.trim().replace(/\s+/g, ' ').slice(0, 80)
+    saveAgentSession({
+      id: sessionId,
+      title: placeholderTitle,
+      createdAt: now,
+      updatedAt: now,
+      messageCount: 0,
+      preview: placeholderPreview,
+      messages: [],
+      projectId: params.projectId ?? 'default',
+      stats: { iterations: 0, toolCalls: 0, totalDurationMs: 0 },
+    })
+
     const apiKey = await getStoredApiKey()
     const service = new DialogueService()
     active.set(sessionId, service)

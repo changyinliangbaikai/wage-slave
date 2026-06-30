@@ -17,6 +17,7 @@ import type {
   AgentSession,
   AgentSessionMeta,
 } from '@shared/types'
+import { isOutputLimitContinuationPrompt } from '@shared/output-limit-continuation'
 
 const SESSIONS_DIR = path.join(app.getPath('userData'), 'agent-sessions')
 ensureDir()
@@ -66,9 +67,10 @@ function toMeta(s: AgentSession): AgentSessionMeta {
  * 取首条 user 消息为标题，首条 user + 首条 assistant 拼成预览
  */
 export function deriveSessionMeta(messages: AgentMessage[]): { title: string; preview: string } {
-  const firstUser = messages.find(m => m.role === 'user')?.content?.trim() ?? ''
+  const visibleMessages = messages.filter(m => !isOutputLimitContinuationPrompt(m))
+  const firstUser = visibleMessages.find(m => m.role === 'user')?.content?.trim() ?? ''
   const title = firstUser ? firstUser.slice(0, 24) : '新会话'
-  const firstAssistant = messages.find(m => m.role === 'assistant')?.content?.trim() ?? ''
+  const firstAssistant = visibleMessages.find(m => m.role === 'assistant')?.content?.trim() ?? ''
   const preview = (firstUser + (firstAssistant ? '  ·  ' + firstAssistant : ''))
     .replace(/\s+/g, ' ')
     .slice(0, 80)
@@ -103,7 +105,8 @@ export function getAgentSession(id: string): AgentSession | null {
 export function saveAgentSession(session: AgentSession): AgentSessionMeta {
   ensureDir()
   const now = Date.now()
-  const derived = deriveSessionMeta(session.messages ?? [])
+  const messages = (session.messages ?? []).filter(m => !isOutputLimitContinuationPrompt(m))
+  const derived = deriveSessionMeta(messages)
 
   const normalized: AgentSession = {
     ...session,
@@ -111,7 +114,8 @@ export function saveAgentSession(session: AgentSession): AgentSessionMeta {
       ? session.title
       : derived.title,
     preview: derived.preview,
-    messageCount: session.messages?.length ?? 0,
+    messages,
+    messageCount: messages.length,
     createdAt: session.createdAt || now,
     updatedAt: now,
     // 写盘时把 projectId 持久化，未指定时缺省 'default'

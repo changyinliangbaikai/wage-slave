@@ -172,6 +172,7 @@ export async function startChat(
   let usagePrompt = 0
   let usageCompletion = 0
   let usageFromApi = false
+  let usageCached = 0
   const splitter = new ThinkSplitter()
 
   try {
@@ -237,6 +238,7 @@ export async function startChat(
         if (chunk.usage && typeof chunk.usage.prompt_tokens === 'number') {
           usagePrompt = chunk.usage.prompt_tokens
           usageCompletion = chunk.usage.completion_tokens ?? usageCompletion
+          usageCached = chunk.usage.prompt_tokens_details?.cached_tokens ?? chunk.usage.prompt_cache_hit_tokens ?? 0
           usageFromApi = true
         }
 
@@ -292,6 +294,7 @@ export async function startChat(
       firstTokenLatency,
       totalDurationMs,
       fromApiUsage: usageFromApi,
+      cacheHitTokens: usageCached,
     }
 
     console.log(
@@ -328,6 +331,7 @@ export async function startChat(
           firstTokenLatency,
           totalDurationMs,
           fromApiUsage: usageFromApi,
+          cacheHitTokens: usageCached,
         },
       })
       return

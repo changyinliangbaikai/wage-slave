@@ -19,6 +19,7 @@ import {
   renameProject,
   deleteProject,
   getProject,
+  togglePinProject,
 } from '../chat/project-store'
 import { reassignSessionsToDefault } from '../agent/session-store'
 
@@ -55,8 +56,9 @@ export function registerProjectIPC(): void {
     const project = getProject(id)
     const ok = deleteProject(id)
     if (ok && project) {
-      // 把该项目下的所有 Agent 会话归集到默认项目
-      reassignSessionsToDefault(id)
+      // 删除该项目下的所有会话
+      const { deleteSessionsByProject } = require('../chat/chat-store')
+      deleteSessionsByProject(id)
     }
     if (ok) broadcastProjectChanged()
     return { ok }
@@ -71,5 +73,28 @@ export function registerProjectIPC(): void {
       return { ok: false, canceled: true }
     }
     return { ok: true, path: result.filePaths[0] }
+  })
+
+  ipcMain.handle(IPC.PROJECT_TOGGLE_PIN, (_e, id: string) => {
+    const ok = togglePinProject(id)
+    if (ok) broadcastProjectChanged()
+    return { ok }
+  })
+
+  ipcMain.handle(IPC.PROJECT_SHOW_IN_EXPLORER, async (_e, id: string) => {
+    const project = getProject(id)
+    if (!project) return { ok: false, error: '项目不存在' }
+    try {
+      const { shell } = require('electron')
+      const fs = require('fs')
+      if (fs.existsSync(project.path)) {
+        shell.showItemInFolder(project.path)
+        return { ok: true }
+      } else {
+        return { ok: false, error: '目录不存在' }
+      }
+    } catch (e) {
+      return { ok: false, error: String(e) }
+    }
   })
 }

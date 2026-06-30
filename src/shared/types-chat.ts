@@ -65,6 +65,8 @@ export interface ChatMessage {
     totalTokens?: number
     /** 模型上下文窗口上限（用于前端计算占比；缺省 32768） */
     maxTokens?: number
+    /** 缓存命中的 token 数 */
+    cacheHitTokens?: number
   }
   createdAt: number
 }

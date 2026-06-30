@@ -38,9 +38,36 @@ export function AgentInput({
   onInstantSubmit,
 }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const [slashOpen, setSlashOpen] = useState(false)
   const [slashIndex, setSlashIndex] = useState(0)
   const [resolving, setResolving] = useState(false)
+
+  // 保证选中的斜杠命令在可见滚动区域内
+  useEffect(() => {
+    if (slashOpen && menuRef.current) {
+      const menu = menuRef.current
+      const activeItem = menu.querySelector('.agent-slash-menu__item.is-active') as HTMLElement
+      if (activeItem) {
+        const hint = menu.querySelector('.agent-slash-menu__hint') as HTMLElement
+        const hintHeight = hint ? hint.offsetHeight : 30
+
+        const menuTop = menu.scrollTop
+        const menuBottom = menuTop + menu.clientHeight
+        const itemTop = activeItem.offsetTop
+        const itemBottom = itemTop + activeItem.offsetHeight
+
+        // 如果向上切换时光标被顶部的 sticky 提示栏盖住，向上滚动
+        if (itemTop - hintHeight < menuTop) {
+          menu.scrollTop = Math.max(0, itemTop - hintHeight)
+        } 
+        // 如果向下切换时超出了容器下边界，向下滚动
+        else if (itemBottom > menuBottom) {
+          menu.scrollTop = itemBottom - menu.clientHeight
+        }
+      }
+    }
+  }, [slashIndex, slashOpen])
 
   // 自动高度（最大 8 行）
   useEffect(() => {
@@ -144,10 +171,10 @@ export function AgentInput({
   }
 
   return (
-    <div className="agent-input">
+    <div className="input-capsule-container">
       {/* 斜杠命令浮层 */}
       {slashOpen && slashMatches.length > 0 && (
-        <div className="agent-slash-menu" role="listbox" aria-label="斜杠命令">
+        <div ref={menuRef} className="agent-slash-menu" role="listbox" aria-label="斜杠命令">
           <div className="agent-slash-menu__hint">选择命令 · ↑↓ 导航 · Enter/Tab 选中 · Esc 关闭</div>
           {slashMatches.map((cmd, i) => (
             <button
@@ -170,45 +197,68 @@ export function AgentInput({
 
       <textarea
         ref={ref}
-        className="agent-input__textarea"
+        className="input-capsule__textarea"
         value={value}
         onChange={e => onChange(e.target.value)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
-        rows={2}
+        rows={1}
         disabled={disabled || resolving}
       />
-      <div className="agent-input__bar">
-        <div className="agent-input__left">
+      
+      <div className="input-capsule__toolbar">
+        <div className="input-capsule__left">
           {onPickFiles && !running && (
             <button
               type="button"
-              className="agent-input__btn agent-input__btn--attach"
+              className="input-capsule__btn"
               onClick={onPickFiles}
               disabled={isReadingFiles || disabled}
               title="添加文件附件"
             >
-              📎 {isReadingFiles ? '读取中...' : '附件'}
+              📎 {isReadingFiles ? '...' : '添加文件'}
             </button>
           )}
-          <span className="agent-input__hint">
-            {resolving ? '⏳ 正在读取命令数据...' : 'Enter 换行 · Cmd/Ctrl + Enter 发送 · 输入 / 召出命令'}
-          </span>
-        </div>
-        {running ? (
-          <button type="button" className="agent-input__btn agent-input__btn--stop" onClick={onStop}>
-            停止
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="agent-input__btn agent-input__btn--send"
-            onClick={onSubmit}
-            disabled={disabled || (!value.trim() && !onPickFiles)}
+          <button 
+            type="button" 
+            className="input-capsule__pill"
+            onClick={() => {
+              onChange('/plan ')
+              setTimeout(() => {
+                ref.current?.focus()
+                const len = ref.current?.value.length ?? 0
+                ref.current?.setSelectionRange(len, len)
+              }, 0)
+            }}
           >
-            发送
+            📋 帮我规划
           </button>
-        )}
+          {resolving && <span className="agent-input__hint">⏳ 正在读取命令...</span>}
+        </div>
+        
+        <div className="input-capsule__right">
+          {running ? (
+            <button 
+              type="button" 
+              className="input-capsule__send-btn" 
+              onClick={onStop}
+              title="停止执行"
+              style={{ backgroundColor: 'var(--agent-error, #c0392b)', fontSize: '11px' }}
+            >
+              ■
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="input-capsule__send-btn"
+              onClick={onSubmit}
+              disabled={disabled || (!value.trim() && !onPickFiles)}
+              title="发送任务 (Cmd/Ctrl + Enter)"
+            >
+              ↑
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )

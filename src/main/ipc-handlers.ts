@@ -13,6 +13,7 @@ import { registerAgentCronIPC } from './ipc/agent-cron'
 import { registerProjectIPC } from './ipc/project'
 import { registerChatIPC } from './ipc-handlers-chat'
 import { initProjectStore } from './chat/project-store'
+import { registerConfirmCommandIPC } from './agent/security'
 
 export function registerIPCHandlers(): void {
   // 0. 项目（Project）数据初始化：保证默认项目存在 + 目录就绪
@@ -44,4 +45,7 @@ export function registerIPCHandlers(): void {
 
   // 9. 统一对话管理中心 (整合了简单聊天与 Agent 回复)
   registerChatIPC()
+
+  // 10. 终端命令二次确认 IPC
+  registerConfirmCommandIPC()
 }

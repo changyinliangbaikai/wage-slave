@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { compactTraceValue } from './trace-payload'
 
 export interface TraceEvent {
   eventId: string
@@ -42,7 +43,7 @@ export class MemoryTraceCollector {
       sessionId: this.sessionId,
       runId: this.runId,
       turnId: this.turnId,
-      payload: structuredClone(payload),
+      payload: structuredClone(compactTraceValue(payload)) as Record<string, any>,
     }
 
     if (extra?.spanId !== undefined) {

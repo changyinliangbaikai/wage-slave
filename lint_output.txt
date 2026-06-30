@@ -1,0 +1,231 @@
+
+> xiao-niu-ma@2.1.0 lint
+> eslint "src/**/*.{ts,tsx}"
+
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/main/activity-monitor.ts
+  76:25  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/main/agent/orchestrator.ts
+  710:11  warning  'dynamicContext' is assigned a value but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  710:27  warning  'skillAdditionText' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/main/api-key.ts
+  13:12  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/main/file-attachment/service.ts
+  18:18  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/main/ipc/config.ts
+  13:12  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/main/ipc/data.ts
+  21:12  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/main/tools/spell-check.ts
+  16:12  warning  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/main/windows.ts
+  32:5  warning  'settingsWindow' is never reassigned. Use 'const' instead                                  prefer-const
+  32:5  warning  'settingsWindow' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/components/Modal/Modal.tsx
+  59:17  warning  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  64:17  warning  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  69:17  warning  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  74:17  warning  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+  79:17  warning  Fast refresh only works when a file only exports components. Use a new file to share constants or functions between components  react-refresh/only-export-components
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/components/PetAppearance/index.tsx
+  73:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/components/PetAppearance/index.tsx:73:5
+  71 |
+  72 |   useEffect(() => {
+> 73 |     refresh()
+     |     ^^^^^^^ Avoid calling setState() directly within an effect
+  74 |   }, [refresh])
+  75 |
+  76 |   const showMsg = useCallback((msg: string, durationMs = 2500) => {  react-hooks/set-state-in-effect
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/components/Tools/Scheduler/SchedulerPanel.tsx
+  117:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/components/Tools/Scheduler/SchedulerPanel.tsx:117:5
+  115 |
+  116 |   useEffect(() => {
+> 117 |     loadTasks()
+      |     ^^^^^^^^^ Avoid calling setState() directly within an effect
+  118 |     // 兜底轮询（10s）：避免 IPC 推送丢失导致 UI 长时间不刷新
+  119 |     const timer = setInterval(loadTasks, 10000)
+  120 |     return () => clearInterval(timer)  react-hooks/set-state-in-effect
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/components/Tools/Scheduler/TaskLogViewer.tsx
+  54:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/components/Tools/Scheduler/TaskLogViewer.tsx:54:5
+  52 |
+  53 |   useEffect(() => {
+> 54 |     loadLogs()
+     |     ^^^^^^^^ Avoid calling setState() directly within an effect
+  55 |     // 每 3 秒自动刷新（捕获运行中的任务输出更新）
+  56 |     const timer = setInterval(loadLogs, 3000)
+  57 |     return () => clearInterval(timer)  react-hooks/set-state-in-effect
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/components/chat/Sidebar.tsx
+  53:18  error  Error: Cannot call impure function during render
+
+`Date.now` is an impure function. Calling an impure function can produce unstable results that update unpredictably when the component happens to re-render. (https://react.dev/reference/rules/components-and-hooks-must-be-pure#components-and-hooks-must-be-idempotent).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/components/chat/Sidebar.tsx:53:18
+  51 |   // 格式化时间，把时间戳转为 "16h"、"2周" 等简短展示
+  52 |   const formatMetaTime = (ts: number): string => {
+> 53 |     const diff = Date.now() - ts
+     |                  ^^^^^^^^^^ Cannot call impure function
+  54 |     const mins = Math.floor(diff / 60000)
+  55 |     const hours = Math.floor(mins / 60)
+  56 |     const days = Math.floor(hours / 24)  react-hooks/purity
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/hooks/useChat.ts
+  469:16  warning  Unnecessary escape character: \|  no-useless-escape
+  469:24  warning  Unnecessary escape character: \|  no-useless-escape
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/hooks/useSkills.ts
+  114:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/hooks/useSkills.ts:114:5
+  112 |   // 初次加载
+  113 |   useEffect(() => {
+> 114 |     refresh()
+      |     ^^^^^^^ Avoid calling setState() directly within an effect
+  115 |   }, [refresh])
+  116 |
+  117 |   // 监听主进程通知，自动刷新  react-hooks/set-state-in-effect
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/main.tsx
+  30:10  warning  Fast refresh only works when a file has exports. Move your component(s) to a separate file  react-refresh/only-export-components
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/pages/Chat.tsx
+   23:20  warning  'createProjectIPC' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-unused-vars
+   24:20  warning  'deleteProjectIPC' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-unused-vars
+   25:20  warning  'renameProjectIPC' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     @typescript-eslint/no-unused-vars
+   26:3   warning  'pickProjectDir' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       @typescript-eslint/no-unused-vars
+   32:10  warning  'openSkills' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           @typescript-eslint/no-unused-vars
+   32:22  warning  'openAgentCron' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+   38:10  warning  'formatTokens' is defined but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         @typescript-eslint/no-unused-vars
+   86:14  warning  'err' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        @typescript-eslint/no-unused-vars
+   92:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/pages/Chat.tsx:92:5
+  90 |
+  91 |   useEffect(() => {
+> 92 |     loadAllSessions()
+     |     ^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  93 |   }, [sessionId, projectId, loadAllSessions])
+  94 |
+  95 |   // 监听主进程的设置页激活事件 (如托盘或快捷键触发)                                                                  react-hooks/set-state-in-effect
+  166:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/pages/Chat.tsx:166:5
+  164 |   }, [])
+  165 |   useEffect(() => {
+> 166 |     reloadProjects()
+      |     ^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  167 |     // 监听项目变更广播，自动刷新
+  168 |     if (!api) return
+  169 |     const off = api.on(IPC.PROJECT_CHANGED, () => { reloadProjects() })              react-hooks/set-state-in-effect
+  215:5   warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/pages/Chat.tsx:215:5
+  213 |   // 切换会话时强制贴底
+  214 |   useEffect(() => {
+> 215 |     setStickToBottom(true)
+      |     ^^^^^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  216 |     setShowScrollBtn(false)
+  217 |     requestAnimationFrame(() => scrollToBottom())
+  218 |   }, [sessionId, scrollToBottom])  react-hooks/set-state-in-effect
+  261:9   warning  'handlePick' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  @typescript-eslint/no-unused-vars
+  267:9   warning  'handleDelete' is assigned a value but never used. Allowed unused vars must match /^_/u                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                @typescript-eslint/no-unused-vars
+  509:18  warning  'e' is defined but never used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          @typescript-eslint/no-unused-vars
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/pages/LogViewer.tsx
+  79:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/pages/LogViewer.tsx:79:5
+  77 |
+  78 |   useEffect(() => {
+> 79 |     setLoading(true)
+     |     ^^^^^^^^^^ Avoid calling setState() directly within an effect
+  80 |     api.invoke('renderer:log-get', date).then((l: DailyLog | null) => {
+  81 |       setLog(l)
+  82 |       setLoading(false)  react-hooks/set-state-in-effect
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/pages/agent/AgentInput.tsx
+  67:5  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/jhx/Documents/learn/mark-ai/mark-series/mark-ten-cat-claude/xiao-niu-ma/src/renderer/src/pages/agent/AgentInput.tsx:67:5
+  65 |   useEffect(() => {
+  66 |     const shouldOpen = slashMatches.length > 0 && value.startsWith('/') && !running
+> 67 |     setSlashOpen(shouldOpen)
+     |     ^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  68 |     if (shouldOpen) setSlashIndex(0)
+  69 |   }, [slashMatches, value, running])
+  70 |  react-hooks/set-state-in-effect
+
+✖ 39 problems (1 error, 38 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

@@ -26,6 +26,7 @@ import type {
   ChatSearchHit,
   ChatMode,
 } from '@shared/types-chat'
+import { isOutputLimitContinuationPrompt } from '@shared/output-limit-continuation'
 
 import * as aiStore from '../ai-chat-store'
 import * as agentStore from '../agent/session-store'
@@ -84,6 +85,7 @@ function aiSessionToChat(s: AIChatSession): ChatSession {
 }
 
 function agentSessionToChat(s: AgentSession): ChatSession {
+  const messages = (s.messages ?? []).filter(m => !isOutputLimitContinuationPrompt(m))
   return {
     id: s.id,
     title: s.title,
@@ -94,7 +96,7 @@ function agentSessionToChat(s: AgentSession): ChatSession {
     mode: 'agent',
     // 透传项目归属（多项目过滤需要）
     projectId: s.projectId,
-    messages: (s.messages ?? []).map(agentMsgToChat),
+    messages: messages.map(agentMsgToChat),
     config: { mode: 'agent' },
     stats: s.stats
       ? {
@@ -172,14 +174,15 @@ export function getSession(id: string): ChatSession | null {
 /** 保存/更新一条会话（按 config.mode 路由） */
 export function saveSession(session: ChatSession): ChatSessionMeta {
   if (session.config.mode === 'agent') {
+    const messages = session.messages.filter(m => !isOutputLimitContinuationPrompt(m))
     const agentSession: AgentSession = {
       id: session.id,
       title: session.title,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
-      messageCount: session.messages.length,
+      messageCount: messages.length,
       preview: session.preview,
-      messages: session.messages.map(chatMsgToAgent),
+      messages: messages.map(chatMsgToAgent),
       // 把项目归属一并写盘
       projectId: session.projectId ?? 'default',
       stats: {
@@ -246,6 +249,7 @@ export function searchSessions(query: string): ChatSearchHit[] {
     const matchedMessageIds: string[] = []
     if (s.title.toLowerCase().includes(q)) matchCount++
     for (const m of s.messages ?? []) {
+      if (isOutputLimitContinuationPrompt(m)) continue
       const lower = (m.content ?? '').toLowerCase()
       const idx = lower.indexOf(q)
       if (idx === -1) continue
@@ -270,4 +274,12 @@ export function searchSessions(query: string): ChatSearchHit[] {
   }
 
   return [...chatHits, ...agentHits].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/** 删除属于指定项目的所有会话 */
+export function deleteSessionsByProject(projectId: string): void {
+  const allMeta = listSessions({ projectId })
+  for (const m of allMeta) {
+    deleteSession(m.id)
+  }
 }

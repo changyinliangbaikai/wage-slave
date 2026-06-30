@@ -204,12 +204,21 @@ export const IPC = {
   PROJECT_RENAME:       'renderer:project-rename',       // 重命名项目
   PROJECT_DELETE:       'renderer:project-delete',       // 删除项目（仅索引）
   PROJECT_PICK_DIR:     'renderer:project-pick-dir',     // 打开目录选择器
+  PROJECT_TOGGLE_PIN:   'renderer:project-toggle-pin',   // 置顶/取消置顶项目
+  PROJECT_SHOW_IN_EXPLORER: 'renderer:project-show-in-explorer', // 在系统管理器中显示项目
   // main → renderer
   PROJECT_CHANGED:      'main:project-changed',          // 项目列表变化，通知 UI 刷新
 
   // ── Slash 命令（状态控制型） ───────────────────
   // renderer → main
   CHAT_COMPACT_SESSION: 'renderer:chat-compact-session', // 永久压缩当前会话历史
+
+  // ── 终端命令确认通道 ──────────────────────────
+  CHAT_CONFIRM_COMMAND: 'main:chat-confirm-command',
+  CHAT_CONFIRM_COMMAND_RESPONSE: 'renderer:chat-confirm-command-response',
+
+  // ── 打开外部文件/文件夹 ──────────────────────────
+  SHELL_OPEN_PATH: 'renderer:shell-open-path',
 } as const
 
 export type IPCChannel = typeof IPC[keyof typeof IPC]

@@ -26,6 +26,7 @@ import type {
   AgentToolExecutedPayload,
   AIChatAttachment,
 } from '@shared/types'
+import { OUTPUT_LIMIT_CONTINUATION_PROMPT, isOutputLimitContinuationPrompt } from '@shared/output-limit-continuation'
 import { buildSystemPrompt, buildAgentContext, buildDynamicContext } from './system-prompt'
 import { getActiveToolSchemas, getToolDescription } from './tool-registry'
 import { executeTool } from './tool-executor'
@@ -37,6 +38,9 @@ import { getToolSafety } from './security'
 import { getConfig } from '../store'
 import { MemoryTraceCollector } from './trace-collector'
 import { inferModelContextWindow } from './model-info'
+import { appendRuntimeContextToUserContent, buildRunScopedHistory } from './prompt-cache-policy'
+import { compactContextSegments, compactTraceMessages, compactTraceText, summarizeTraceTools } from './trace-payload'
+import { shouldAutoContinueAfterOutputLimit } from './output-limit-handling'
 
 /** 编排器最大迭代轮次，防止 LLM 反复调用工具死循环 */
 const DEFAULT_MAX_ITERATIONS = 20
@@ -132,7 +136,7 @@ export class AgentOrchestrator {
       name: `小牛马任务 · ${opts.userInput.slice(0, 30)}`,
       model: getConfig().llm_model || 'default-model',
       modelProvider: 'openai-compatible',
-      promptVersion: 'xiao-niu-ma-prompt@2.1.0',
+      promptVersion: 'xiao-niu-ma-prompt@2.2.0',
       skillVersions: ['xiao-niu-ma-agent@2.1.0'],
       toolSchemaVersion: 'xiao-niu-ma-tools@v2.1',
       runtimeVersion: 'xiao-niu-ma-runtime@2.1.0',
@@ -172,7 +176,10 @@ export class AgentOrchestrator {
         : null
 
       this.history = [...opts.history]
+      const runStartIndex = this.history.length
+      const stableHistoryForLLM = compressHistoryForLLM(this.history)
       this.stats = { iterations: 0, toolCalls: 0, totalDurationMs: 0 }
+      let outputLimitContinuations = 0
 
       // ── 技能匹配：基于用户输入命中一个已启用 skill，整轮注入其引导 ──
       const matched = matchSkill(opts.userInput)
@@ -190,9 +197,11 @@ export class AgentOrchestrator {
         createdAt: Date.now(),
       }
       // 上下文构建使用项目 cwd（绑定到当前会话的项目），避免依赖 process.cwd
-      ;(userMsg as any).dynamicContext = await buildDynamicContext(buildAgentContext(this.projectCwd))
+      const dynamicContext = await buildDynamicContext(buildAgentContext(this.projectCwd))
+      ;(userMsg as any).dynamicContext = dynamicContext
+      const skillAdditionText = skillAddition ? `\n# === 激活技能 ===\n${skillAddition}` : ''
       if (skillAddition) {
-        ;(userMsg as any).skillAdditionText = `\n# === 激活技能 ===\n${skillAddition}`
+        ;(userMsg as any).skillAdditionText = skillAdditionText
       }
       this.history.push(userMsg)
 
@@ -205,14 +214,12 @@ export class AgentOrchestrator {
         // 每轮都获取静态 system prompt（支持长期 Prompt Caching）
         const systemPrompt = buildSystemPrompt()
         const tools = getActiveToolSchemas()
-        // 压缩历史：仅本轮 LLM 调用使用，this.history 保持完整以便会话持久化
-        const compressedHistory = compressHistoryForLLM(this.history)
+        // 旧历史在用户回合开始时压缩一次；当前 run 的消息保持原样追加，避免循环内反复改写缓存前缀
+        const compressedHistory = buildRunScopedHistory(this.history, runStartIndex, stableHistoryForLLM)
         const apiMessages = [
           { role: 'system' as const, content: systemPrompt },
           ...compressedHistory.map(m => historyToApi(m)),
         ]
-
-        // 动态环境上下文与激活技能已被永久挂载在 user 消息中，此处无需再次拼接，保证 history 链条内容一致
 
         const contextSnapshotId = `ctx_snap_${Math.random().toString(36).slice(2, 9)}`
         const contextSpanId = `span_ctx_${Math.random().toString(36).slice(2, 9)}`
@@ -253,12 +260,14 @@ export class AgentOrchestrator {
           }
         ]
 
+        const conversationPreview = compressedHistory.map(h => `${h.role}: ${h.content}`).join('\n')
         collector.record('context.build', {
           contextSnapshotId,
           totalTokens: 0,
           maxContextTokens: 32768,
-          finalPrompt: systemPrompt + '\n' + compressedHistory.map(h => `${h.role}: ${h.content}`).join('\n'),
-          segments,
+          finalPrompt: compactTraceText(`${systemPrompt}\n${conversationPreview}`, 4000),
+          finalPromptChars: systemPrompt.length + 1 + conversationPreview.length,
+          segments: compactContextSegments(segments),
           input: {
             userInput: opts.userInput,
             historyCount: compressedHistory.length,
@@ -293,14 +302,26 @@ export class AgentOrchestrator {
 
         if (result.aborted) break
 
+        const cacheHitTokens = result.usage?.prompt_tokens_details?.cached_tokens ?? (result.usage as any)?.prompt_cache_hit_tokens ?? 0
+
+        const shouldAutoContinueLength = shouldAutoContinueAfterOutputLimit(result, outputLimitContinuations)
+        const hitUnrecoverableTextLimit =
+          result.finishReason === 'length' &&
+          result.toolCalls.length === 0 &&
+          !shouldAutoContinueLength
+        const assistantContent = hitUnrecoverableTextLimit && !result.content
+          ? '⚠️ 模型输出连续达到上限，已停止自动续写。请降低推理强度或把任务拆小后重试。'
+          : result.content
+        const executableToolCalls = result.toolCalls
+
         // ── 把 assistant 这一轮的产出写入 history ──
         const assistantMsg: AgentMessage = {
           id: genMsgId('asst'),
           role: 'assistant',
-          content: result.content,
+          content: assistantContent,
           reasoning: result.reasoning || undefined,
-          tool_calls: result.toolCalls.length > 0
-            ? result.toolCalls.map(tc => ({
+          tool_calls: executableToolCalls.length > 0
+            ? executableToolCalls.map(tc => ({
                 id: tc.id,
                 name: tc.name,
                 arguments: JSON.stringify(tc.arguments),
@@ -314,6 +335,7 @@ export class AgentOrchestrator {
             completionTokens,
             totalTokens,
             maxTokens,
+            cacheHitTokens,
           },
           createdAt: Date.now(),
         }
@@ -326,19 +348,25 @@ export class AgentOrchestrator {
           totalTokens,
           maxTokens,
           iteration: this.stats.iterations,
+          cacheHitTokens,
         }
         // 记录最近一轮 token 用量，用于 onDone 时返回
         this.latestTokenUsage = tokenUsage
 
         // ── 检查是否遭遇截断 (Out of Token) ──
-        if (result.finishReason === 'length') {
-          log.warn(`[Agent] sessionId=${this.sessionId} 遭遇 Token 截断，自动插入续写提示`)
+        if (shouldAutoContinueLength) {
+          outputLimitContinuations++
+          log.warn(`[Agent] sessionId=${this.sessionId} 遭遇纯输出 Token 截断，自动插入续写提示 (${outputLimitContinuations})`)
           this.history.push({
             id: genMsgId('user'),
             role: 'user',
-            content: `[System Reminder: Output token limit hit. Please resume your response directly from where you were cut off. Do not apologize, do not summarize, just pick up mid-thought and continue.]`,
+            content: OUTPUT_LIMIT_CONTINUATION_PROMPT,
             createdAt: Date.now(),
           })
+        } else if (result.finishReason === 'length' && result.toolCalls.length > 0) {
+          log.warn(`[Agent] sessionId=${this.sessionId} 工具调用输出遭遇 Token 截断，改为执行/回灌工具错误，避免续写循环`)
+        } else if (hitUnrecoverableTextLimit) {
+          log.warn(`[Agent] sessionId=${this.sessionId} 输出连续截断，停止自动续写`)
         }
 
         const llmSpanId = `span_llm_${Math.random().toString(36).slice(2, 9)}`
@@ -359,13 +387,14 @@ export class AgentOrchestrator {
           prompt_cache_miss_tokens: (result.usage?.prompt_tokens ?? 0) - ((result.usage as any)?.prompt_tokens_details?.cached_tokens ?? 0),
           reasoning_tokens: (result.usage as any)?.completion_tokens_details?.reasoning_tokens ?? 0,
           input: {
-            messages: apiMessages,
-            tools: tools
+            messages: compactTraceMessages(apiMessages),
+            messageCount: apiMessages.length,
+            tools: summarizeTraceTools(tools)
           },
           output: {
-            type: result.toolCalls.length ? 'tool_call' : 'text',
-            content: result.content,
-            toolCalls: result.toolCalls.map(tc => ({
+            type: executableToolCalls.length ? 'tool_call' : 'text',
+            content: assistantContent,
+            toolCalls: executableToolCalls.map(tc => ({
               id: tc.id,
               name: tc.name,
               arguments: tc.arguments
@@ -373,8 +402,16 @@ export class AgentOrchestrator {
           }
         }, { spanId: llmSpanId, parentSpanId: contextSpanId })
 
+        if (shouldAutoContinueLength) {
+          continue
+        }
+        if (hitUnrecoverableTextLimit) {
+          finalContent = assistantContent
+          break
+        }
+
         // ── 没有工具调用 → 任务完成 ──
-        if (result.toolCalls.length === 0) {
+        if (executableToolCalls.length === 0) {
           finalContent = result.content
           break
         }
@@ -383,7 +420,7 @@ export class AgentOrchestrator {
         opts.callbacks.onToolStart({
           sessionId: this.sessionId,
           iteration: this.stats.iterations,
-          toolCalls: result.toolCalls.map(tc => ({
+          toolCalls: executableToolCalls.map(tc => ({
             id: tc.id,
             name: tc.name,
             description: getToolDescription(tc.name),
@@ -395,7 +432,7 @@ export class AgentOrchestrator {
         })
 
         const toolResults = await this.executeAllTools(
-          result.toolCalls,
+          executableToolCalls,
           opts.callbacks,
           collector,
           llmSpanId,
@@ -680,7 +717,9 @@ export class AgentOrchestrator {
       const now = Date.now()
       // 持久化前剥离挂在 user 消息上的临时运行时字段（dynamicContext / skillAdditionText），
       // 这些是每轮 LLM 调用注入用的环境快照，写盘会膨胀会话 JSON 且载入后已失效
-      const persistableMessages = this.history.map(stripTransientFields)
+      const persistableMessages = this.history
+        .map(stripTransientFields)
+        .filter(m => !isOutputLimitContinuationPrompt(m))
       const session: AgentSession = {
         id: this.sessionId,
         title,
@@ -707,7 +746,7 @@ export class AgentOrchestrator {
  * 仅在内存 history 中保留供 historyToApi 使用，不应写盘（会膨胀 JSON 且载入后已失效）
  */
 function stripTransientFields(m: AgentMessage): AgentMessage {
-  const { dynamicContext, skillAdditionText, ...rest } = m as AgentMessage & {
+  const { dynamicContext: _dynamicContext, skillAdditionText: _skillAdditionText, ...rest } = m as AgentMessage & {
     dynamicContext?: unknown
     skillAdditionText?: unknown
   }
@@ -747,18 +786,17 @@ function historyToApi(m: AgentMessage): {
     }
   }
 
-  // user 角色：如果有附件，拼接附件内容到 content，再追加环境与技能快照
+  // user 角色：如果有附件，拼接附件内容到 content，再追加本轮环境与技能快照
   if (m.role === 'user') {
     let content = m.content
     if (m.attachments && m.attachments.length > 0) {
       content = buildContentWithAttachments(m.content, m.attachments)
     }
-    if ((m as any).dynamicContext) {
-      content = content + '\n' + (m as any).dynamicContext
-    }
-    if ((m as any).skillAdditionText) {
-      content = content + '\n' + (m as any).skillAdditionText
-    }
+    content = appendRuntimeContextToUserContent(
+      content,
+      (m as any).dynamicContext,
+      (m as any).skillAdditionText,
+    )
     return { role: m.role, content }
   }
 

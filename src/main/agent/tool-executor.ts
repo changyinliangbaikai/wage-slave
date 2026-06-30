@@ -42,6 +42,7 @@ import { extractFileContent } from '../file-attachment/service'
 import { grepCode, globFiles } from './code-search'
 import { gitStatus, gitDiff, gitLog } from './git-tools'
 import { webFetch, webSearch } from './web-tools'
+import { buildToolArgumentParseErrorMessage, getToolArgumentParseError } from './output-limit-handling'
 import {
   getAllSkills,
   getSkillById,
@@ -107,6 +108,10 @@ export async function executeTool(
     // 给 LLM 一个明确的错误，方便它换路径
     if (!isToolEnabled(call.name)) {
       throw new Error(`工具 "${call.name}" 已被用户在设置中关闭，本次会话不可用。请改用其他方式或提醒用户去「设置 → Agent 工具权限」启用。`)
+    }
+
+    if (getToolArgumentParseError(call)) {
+      throw new Error(buildToolArgumentParseErrorMessage(call))
     }
 
     let raw: string
@@ -695,12 +700,9 @@ interface RunCommandArgs { command: string; work_dir?: string; timeout_ms?: numb
 async function toolRunCommand(args: unknown, signal?: AbortSignal, projectCwd?: string): Promise<string> {
   const { command, work_dir, timeout_ms } = pickArgs<RunCommandArgs>(args, ['command'])
 
-  // 第一道防线：黑名单（命令边界正则）
+  // 安全分级：黑名单命令需用户确认，安全命令直接执行
   const check = checkCommand(command)
-  if (!check.allowed) {
-    console.warn(`[Agent.tool] run_command 被黑名单拦截: ${command} | 原因: ${check.reason}`)
-    throw new Error(`命令被安全策略拒绝：${check.reason ?? '未知原因'}。命令: "${preview(command, 80)}"`)
-  }
+
   // 命令工作目录：优先用工具参数 work_dir；否则回退到项目根 projectCwd
   const targetWorkDir = work_dir ? resolvePath(work_dir, projectCwd) : projectCwd
   if (targetWorkDir) {
@@ -709,16 +711,21 @@ async function toolRunCommand(args: unknown, signal?: AbortSignal, projectCwd?: 
 
   const timeout = clamp(timeout_ms ?? 30_000, 1_000, 120_000)
 
-  // 第二道防线：人工二次确认（即使过了黑名单也强制弹窗）
-  // 黑名单不是完美沙盒（如 \rm、/bin/rm、变量展开等都可能绕过），
-  // 这一步把决策权交给用户，杜绝 Agent 误删/误改文件的风险
-  const userAllowed = await confirmCommandWithUser({
-    command,
-    workDir: targetWorkDir,
-    timeoutMs: timeout,
-  })
-  if (!userAllowed) {
-    throw new Error(`用户拒绝执行命令: "${preview(command, 80)}"`)
+  if (!check.allowed) {
+    // 命中黑名单：弹窗让用户确认，用户可放行或拒绝
+    console.warn(`[Agent.tool] run_command 命中风险规则，需用户确认: ${command} | 原因: ${check.reason}`)
+    const userAllowed = await confirmCommandWithUser({
+      command,
+      workDir: targetWorkDir,
+      timeoutMs: timeout,
+      reason: check.reason,
+    })
+    if (!userAllowed) {
+      throw new Error(`用户拒绝执行命令: "${preview(command, 80)}"`)
+    }
+  } else {
+    // 安全命令：直接执行，记录日志
+    console.log(`[Agent.tool] run_command 安全命令直接执行: ${preview(command, 120)}`)
   }
   const cwd = targetWorkDir
   recordAgentAudit({

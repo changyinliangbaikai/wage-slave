@@ -98,3 +98,131 @@
 .modal-btn--confirm:hover { background: #a85f2e; border-color: #a85f2e; }
 .modal-btn--danger { background: #c0392b; color: #fff; border-color: #c0392b; }
 .modal-btn--danger:hover { background: #a52f23; border-color: #a52f23; }
+
+/* Custom Command Confirmation Modal */
+.modal-panel--command {
+  width: 580px;
+  max-width: 90vw;
+  background-color: var(--agent-panel, #fffef7) !important;
+  border: 1px solid var(--agent-border-strong, #d6cdb6);
+  box-shadow: 0 12px 36px rgba(58, 42, 26, 0.18);
+}
+
+.modal-command-meta {
+  padding: 8px 16px;
+  background-color: var(--agent-panel-alt, #fffef0);
+  border: 1px solid var(--agent-border, #e5e0d1);
+  border-radius: 6px;
+  margin: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+}
+
+.meta-label {
+  color: var(--agent-text-dim, #8b7a5d);
+  width: 80px;
+}
+
+.meta-value {
+  color: var(--agent-text, #3a2a1a);
+  font-weight: 500;
+  font-family: var(--agent-mono, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 440px;
+}
+
+.modal-command-box-wrapper {
+  position: relative;
+  margin: 12px 16px;
+  border: 1px solid var(--agent-border, #e5e0d1);
+  border-radius: 8px;
+  background-color: var(--agent-bg, #f7f5ef);
+  overflow: hidden;
+}
+
+.modal-command-pre {
+  margin: 0;
+  padding: 14px;
+  max-height: 250px;
+  overflow-y: auto;
+  font-family: var(--agent-mono, monospace);
+  font-size: 13px;
+  color: var(--agent-text, #3a2a1a);
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.command-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background-color: var(--agent-panel-alt, #fffef0);
+  border: 1px solid var(--agent-border, #e5e0d1);
+  color: var(--agent-text, #3a2a1a);
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.command-copy-btn:hover {
+  opacity: 1;
+  border-color: var(--agent-border-strong, #d6cdb6);
+}
+
+.modal-command-reason {
+  margin: 8px 16px;
+  font-size: 13px;
+  color: var(--agent-error, #c0392b);
+  background-color: rgba(192, 57, 43, 0.08);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--agent-error, #c0392b);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.modal-command-reason .reason-icon {
+  flex-shrink: 0;
+}
+
+.modal-command-reason .reason-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.modal-command-warning {
+  margin: 8px 16px;
+  font-size: 12px;
+  color: var(--agent-error, #c0392b);
+  font-weight: 600;
+  background-color: rgba(192, 57, 43, 0.05);
+  padding: 8px 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--agent-error, #c0392b);
+}
+
+.modal-btn--confirm-execute {
+  border: 1px solid var(--agent-success, #5a8f3c);
+  background-color: var(--agent-success, #5a8f3c);
+  color: #ffffff;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.modal-btn--confirm-execute:hover {
+  opacity: 0.9;
+}
