@@ -22,7 +22,8 @@ jobs:
   # ── Windows 构建 ───────────────────────────────────────
   build-windows:
     name: Build Windows Installer
-    runs-on: windows-latest
+    # 使用 windows-2022 而非 windows-latest，避免 node-gyp 无法识别 VS 2026（版本 18）
+    runs-on: windows-2022
     permissions:
       contents: read
 
