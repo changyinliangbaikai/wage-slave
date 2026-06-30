@@ -129,7 +129,10 @@ export default function Settings() {
       </section>
 
       <section className="settings-section">
-        <h2>AI 模型配置</h2>
+        <h2>模型配置</h2>
+        <p style={{ fontSize: 12, color: '#8a7e5e', marginBottom: 12 }}>
+          全应用统一使用此 LLM（Agent 对话、定时任务、错别字检查等），建议优先选择支持 tool_calls 的模型。
+        </p>
         <div className="field-row">
           <label>API 地址</label>
           <input

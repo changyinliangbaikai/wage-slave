@@ -10,6 +10,7 @@ import {
   toggleAgentCron,
   useOnSchedulerTasksChanged,
 } from '../../hooks/useIPC'
+import { confirm as modalConfirm } from '../../components/Modal/Modal'
 import './AgentCronPage.css'
 
 const WEEK_DAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -142,7 +143,8 @@ export default function AgentCronPage() {
   }
 
   const handleDelete = async (id: string) => {
-    if (!window.confirm('确定要删除这个 Agent Cron 吗？')) return
+    const ok = await modalConfirm('确定要删除这个 Agent Cron 吗？', '删除 Agent Cron', true)
+    if (!ok) return
     await deleteAgentCron(id)
     await refresh()
     flash('已删除')

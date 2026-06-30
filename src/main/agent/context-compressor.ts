@@ -28,6 +28,7 @@
 import log from 'electron-log/main'
 import type { AgentMessage } from '@shared/types'
 import { getConfig } from '../store'
+import { detectModelFamily, type ModelFamily } from './model-info'
 
 /** 压缩配置 */
 export interface CompressConfig {
@@ -70,14 +71,21 @@ const DEFAULT_CONFIG: CompressConfig = {
  *   - DeepSeek v4 等：64k+ 窗口，保留 48000 字
  *   - GPT-4o 等：128k 窗口，保留 64000 字
  *   - 默认（保守）：16k 窗口
+ *
+ * 模型族识别统一收敛到 agent/model-info.ts，避免与 orchestrator 漂移
  */
 export function getCompressConfig(): CompressConfig {
   const cfg = getConfig()
   // agent_llm_model 为空时回退到 llm_model（主聊天模型）
-  const model = (cfg.agent_llm_model || cfg.llm_model || '').toLowerCase()
+  const model = cfg.agent_llm_model || cfg.llm_model
+  const family = detectModelFamily(model)
 
-  // DeepSeek 系列（64k+ 上下文）
-  if (model.includes('deepseek')) {
+  // 大窗口模型族（128k+ 上下文）：GPT-4o / Claude / Gemini / Qwen-Max / Moonshot
+  const LARGE_WINDOW_FAMILIES: ReadonlySet<ModelFamily> = new Set<ModelFamily>([
+    'gpt4o', 'claude', 'gemini', 'qwen-max', 'moonshot',
+  ])
+
+  if (family === 'deepseek') {
     return {
       keepRecent: 20,
       maxToolChars: 8000,
@@ -89,18 +97,7 @@ export function getCompressConfig(): CompressConfig {
     }
   }
 
-  // GPT-4o / Gemini Pro / Claude 系列（128k+ 上下文）
-  if (
-    model.includes('gpt-4o') ||
-    model.includes('gpt-4-turbo') ||
-    model.includes('gpt-5') ||
-    model.includes('o1') ||
-    model.includes('o3') ||
-    model.includes('claude') ||
-    model.includes('gemini') ||
-    model.includes('qwen-max') ||
-    model.includes('qwen-plus')
-  ) {
+  if (LARGE_WINDOW_FAMILIES.has(family)) {
     return {
       keepRecent: 24,
       maxToolChars: 12000,

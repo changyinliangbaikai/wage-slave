@@ -36,6 +36,7 @@ import { compressHistoryForLLM } from './context-compressor'
 import { getToolSafety } from './security'
 import { getConfig } from '../store'
 import { MemoryTraceCollector } from './trace-collector'
+import { inferModelContextWindow } from './model-info'
 
 /** 编排器最大迭代轮次，防止 LLM 反复调用工具死循环 */
 const DEFAULT_MAX_ITERATIONS = 20
@@ -478,6 +479,13 @@ export class AgentOrchestrator {
       } else {
         const msg = e instanceof Error ? e.message : String(e)
         log.error(`[Agent] 执行异常 sessionId=${this.sessionId}:`, msg)
+        // 异常路径也要持久化已产生的 history（user/工具结果/部分 assistant），
+        // 否则用户在 LLM API 报错、工具抛非 fatal 异常时会丢失整段对话无法恢复
+        try {
+          this.persistSession(finalContent || `(执行异常: ${msg})`)
+        } catch (persistErr) {
+          log.warn('[Agent] 异常路径持久化失败:', persistErr)
+        }
         opts.callbacks.onError({
           sessionId: this.sessionId,
           error: msg,
@@ -502,10 +510,14 @@ export class AgentOrchestrator {
       })
 
       const jsonlData = collector.toJSONL()
+      // 加超时保护：若本地 Bridge 端口被占用但 accept 后不响应，避免 socket 长期挂起
+      const bridgeController = new AbortController()
+      const bridgeTimer = setTimeout(() => bridgeController.abort(), 5_000)
       fetch('http://127.0.0.1:4310/api/runs/import-jsonl', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: jsonlData })
+        body: JSON.stringify({ content: jsonlData }),
+        signal: bridgeController.signal,
       })
         .then(async (res) => {
           if (res.ok) {
@@ -515,8 +527,11 @@ export class AgentOrchestrator {
           }
         })
         .catch(err => {
-          log.error('[Jarvis Bridge] Trace 自动推送失败:', err)
+          // 超时/连接失败属于预期内（Bridge 未启动），降级为 debug 级别避免日志噪音
+          const msg = err instanceof Error ? err.message : String(err)
+          log.warn(`[Jarvis Bridge] Trace 自动推送失败: ${msg}`)
         })
+        .finally(() => clearTimeout(bridgeTimer))
     }
   }
 
@@ -663,24 +678,40 @@ export class AgentOrchestrator {
       const title = (firstUser?.content ?? '新会话').slice(0, 24) || '新会话'
       const preview = (firstUser?.content ?? '').replace(/\s+/g, ' ').slice(0, 80)
       const now = Date.now()
+      // 持久化前剥离挂在 user 消息上的临时运行时字段（dynamicContext / skillAdditionText），
+      // 这些是每轮 LLM 调用注入用的环境快照，写盘会膨胀会话 JSON 且载入后已失效
+      const persistableMessages = this.history.map(stripTransientFields)
       const session: AgentSession = {
         id: this.sessionId,
         title,
         createdAt: this.history[0]?.createdAt ?? now,
         updatedAt: now,
-        messageCount: this.history.length,
+        messageCount: persistableMessages.length,
         preview,
-        messages: this.history,
+        messages: persistableMessages,
         // 记录会话所属项目，便于按项目过滤
         projectId: this.projectId,
         stats: { ...this.stats },
       }
       saveAgentSession(session)
-      log.info(`[Agent] 持久化会话 id=${this.sessionId} msgs=${this.history.length} latestLen=${latestContent.length}`)
+      log.info(`[Agent] 持久化会话 id=${this.sessionId} msgs=${persistableMessages.length} latestLen=${latestContent.length}`)
     } catch (e) {
       log.warn('[Agent] 持久化失败:', e)
     }
   }
+}
+
+/**
+ * 持久化前剥离挂在消息上的临时运行时字段
+ * 这些字段（dynamicContext / skillAdditionText）是每轮 LLM 调用注入用的环境快照，
+ * 仅在内存 history 中保留供 historyToApi 使用，不应写盘（会膨胀 JSON 且载入后已失效）
+ */
+function stripTransientFields(m: AgentMessage): AgentMessage {
+  const { dynamicContext, skillAdditionText, ...rest } = m as AgentMessage & {
+    dynamicContext?: unknown
+    skillAdditionText?: unknown
+  }
+  return rest
 }
 
 /**
@@ -809,20 +840,8 @@ function isAbortError(e: unknown): boolean {
 
 /**
  * 推断当前模型的上下文窗口上限（用于前端显示占比）
- * 与 context-compressor.ts 的模型识别策略保持一致
+ * 实际识别逻辑统一收敛到 agent/model-info.ts，避免与 context-compressor 漂移
  */
 export function inferModelMaxTokens(): number {
-  const cfg = getConfig()
-  const model = (cfg.agent_llm_model || cfg.llm_model || '').toLowerCase()
-  if (!model) return 32_768
-  if (model.includes('gpt-4o') || model.includes('gpt-4-turbo')) return 128_000
-  if (model.includes('gpt-5') || model.includes('o1') || model.includes('o3')) return 128_000
-  if (model.includes('claude-3') || model.includes('claude-4')) return 200_000
-  if (model.includes('claude')) return 200_000
-  if (model.includes('gemini')) return 128_000
-  if (model.includes('deepseek')) return 64_000
-  if (model.includes('qwen')) return 32_768
-  if (model.includes('moonshot') || model.includes('kimi')) return 128_000
-  if (model.includes('minimax')) return 245_760
-  return 32_768
+  return inferModelContextWindow()
 }

@@ -9,6 +9,7 @@ import Chat from './pages/Chat'
 import SkillsPage from './pages/SkillsPage'
 import AgentCronPage from './pages/agent/AgentCronPage'
 import ErrorBoundary from './components/ErrorBoundary'
+import { ModalRoot } from './components/Modal/Modal'
 import './App.css'
 
 // 渲染进程日志同样写入同一文件
@@ -40,6 +41,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
       <RootPage />
+      <ModalRoot />
     </ErrorBoundary>
   </React.StrictMode>,
 )

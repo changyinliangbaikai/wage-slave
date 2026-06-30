@@ -331,6 +331,10 @@ function buildEditNotFoundError(content: string, oldString: string): string {
 /**
  * 模糊匹配：先尝试忽略行尾空白，再尝试忽略统一缩进差异
  * 命中时返回原文中的起止索引，调用方据此切片替换
+ *
+ * 安全保障：mapTrimmedIndexToOriginal 用启发式把 stripped 索引映射回原文，
+ * 偏移可能算错。因此命中后必须回切原文片段，应用同一 strip 函数校验
+ * 结果确实等于 strippedOld；不一致则放弃该候选，避免写坏文件。
  */
 function findFuzzyMatch(
   content: string,
@@ -342,8 +346,8 @@ function findFuzzyMatch(
   const trimmedOld = trimRight(oldString)
   let idx = trimmedContent.indexOf(trimmedOld)
   if (idx !== -1) {
-    // 通过行号映射回原始 content 的索引
-    return mapTrimmedIndexToOriginal(content, trimmedContent, idx, trimmedOld.length)
+    const cand = mapTrimmedIndexToOriginal(content, trimmedContent, idx, trimmedOld.length)
+    if (cand && verifyFuzzySlice(content, cand, trimRight, trimmedOld)) return cand
   }
 
   // 策略 2：去掉每行前导空白后比较
@@ -353,10 +357,29 @@ function findFuzzyMatch(
   idx = strippedContent.indexOf(strippedOld)
   if (idx !== -1 && strippedOld.length > 10) {
     // 仅在 old_string 较长时启用激进模糊匹配，避免误命中
-    return mapTrimmedIndexToOriginal(content, strippedContent, idx, strippedOld.length)
+    const cand = mapTrimmedIndexToOriginal(content, strippedContent, idx, strippedOld.length)
+    if (cand && verifyFuzzySlice(content, cand, stripIndent, strippedOld)) return cand
   }
 
   return null
+}
+
+/**
+ * 校验模糊匹配切出的原文片段，经同一 strip 函数处理后确实等于目标字符串
+ * 这是写盘前的最后一道防线：mapTrimmedIndexToOriginal 偏移算错时此处会失败，
+ * 从而放弃替换而不是写坏文件
+ */
+function verifyFuzzySlice(
+  content: string,
+  cand: { startIndex: number; endIndex: number },
+  strip: (s: string) => string,
+  expected: string,
+): boolean {
+  if (cand.startIndex < 0 || cand.endIndex > content.length || cand.startIndex >= cand.endIndex) {
+    return false
+  }
+  const slice = content.slice(cand.startIndex, cand.endIndex)
+  return strip(slice) === expected
 }
 
 /**

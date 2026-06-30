@@ -48,16 +48,70 @@ export interface SlashCommand {
   label: string          // 菜单显示名
   icon: string
   hint: string           // 简短说明
-  group: 'xiaoniu' | 'prompt' | 'favorite'
+  group: 'system' | 'xiaoniu' | 'prompt' | 'favorite'
   /** 异步产出插入到输入框的文本；返回 null 表示取消 */
   resolve?: () => Promise<string | null>
   /** 静态模板；与 resolve 二选一 */
   template?: string
+  /**
+   * true 时菜单选中后由调用方立即提交，不需要用户再补充内容；
+   * 用于状态控制型命令（/help、/compact 等）
+   */
+  immediate?: boolean
   /** 是否可被用户删除（收藏项为 true） */
   deletable?: boolean
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
+  // ── 系统命令（Slash Commands，前端拦截执行） ──────
+  {
+    id: 'cmd-help',
+    trigger: '/help',
+    label: '命令帮助',
+    icon: '❓',
+    hint: '查看所有 slash 命令的用法',
+    group: 'system',
+    template: '/help',
+    immediate: true,
+  },
+  {
+    id: 'cmd-plan',
+    trigger: '/plan',
+    label: '计划模式',
+    icon: '🗂️',
+    hint: '先写 plan/proposal.md 等待批准，未批准前禁止改代码',
+    group: 'system',
+    template: '/plan ',
+  },
+  {
+    id: 'cmd-model',
+    trigger: '/model',
+    label: '切换模型',
+    icon: '🤖',
+    hint: '/model <模型名> 切换 Agent 模型；不带参数查看当前',
+    group: 'system',
+    template: '/model ',
+  },
+  {
+    id: 'cmd-effort',
+    trigger: '/effort',
+    label: '推理强度',
+    icon: '🧠',
+    hint: '/effort low|medium|high 调整 reasoning 模型推理深度',
+    group: 'system',
+    template: '/effort ',
+  },
+  {
+    id: 'cmd-compact',
+    trigger: '/compact',
+    label: '压缩会话',
+    icon: '🗜️',
+    hint: '永久压缩历史消息为摘要，节约上下文 tokens',
+    group: 'system',
+    template: '/compact',
+    immediate: true,
+  },
+
   // ── 小牛马联动 ─────────────────────────────
   {
     id: 'today-log',

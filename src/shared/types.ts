@@ -70,6 +70,12 @@ export interface AppConfig {
    * 取值：'low' / 'medium' / 'high'；空字符串或缺省表示不发送该参数
    */
   agent_reasoning_effort?: 'low' | 'medium' | 'high' | ''
+  /**
+   * Agent 上下文窗口上限（tokens）：用户自定义模型上下文长度。
+   *  - 0 或未设置：按模型名自动推断（见 model-info.ts）
+   *  - >0：强制使用该值（用于上下文占比显示与压缩阈值计算）
+   */
+  agent_context_window?: number
 }
 
 /** Agent 工具分组元数据（仅用于设置页 UI 渲染） */

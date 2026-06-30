@@ -15,8 +15,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useLayoutEffect } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import {
   useChat,
   listChatSessions,
@@ -37,6 +35,9 @@ import { AgentInput } from './agent/AgentInput'
 import { useFileAttachments } from '../hooks/useFileAttachments'
 import { AttachmentList } from '../components/AttachmentList'
 import MessageCopyButton from '../components/MessageCopyButton'
+import { MarkdownRenderer } from '../components/MarkdownRenderer'
+import { alert as modalAlert, confirm as modalConfirm, prompt as modalPrompt } from '../components/Modal/Modal'
+import { formatTokens } from '../utils/format-tokens'
 // 复用 Agent 样式中的工具卡片 / 输入框 / 配色变量（.agent-tool-card / .agent-input / --agent-*）
 import './Chat.css'
 
@@ -56,6 +57,7 @@ export default function Chat() {
     loadSession,
     switchProject,
     runSlashCommand,
+    regenerate,
   } = useChat()
 
   useLayoutEffect(() => {
@@ -70,6 +72,29 @@ export default function Chat() {
   const [sessions, setSessions] = useState<ChatSessionMeta[]>([])
   const listRef = useRef<HTMLDivElement>(null)
   const [dragOver, setDragOver] = useState(false)
+  // 拖拽计数器：避免经过子元素时 dragleave 误触发导致蒙层闪烁
+  const dragCounter = useRef(0)
+  // 智能滚动：是否贴底（用户未手动上滚时才自动跟随）
+  const [stickToBottom, setStickToBottom] = useState(true)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
+
+  // 监听消息列表滚动，判断是否贴底
+  const handleListScroll = useCallback(() => {
+    const el = listRef.current
+    if (!el) return
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight
+    const atBottom = distance < 80
+    setStickToBottom(atBottom)
+    setShowScrollBtn(!atBottom && el.scrollHeight > el.clientHeight + 200)
+  }, [])
+
+  const scrollToBottom = useCallback((smooth = false) => {
+    const el = listRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
+    setStickToBottom(true)
+    setShowScrollBtn(false)
+  }, [])
 
   // 项目列表与项目管理面板
   const [projects, setProjects] = useState<Project[]>([])
@@ -100,11 +125,37 @@ export default function Chat() {
     clearAttachments,
   } = useFileAttachments()
 
-  // 自动滚到底部
+  // 全局键盘快捷键：Esc 关闭抽屉 · Cmd/Ctrl+K 历史 · Cmd/Ctrl+N 新会话
   useEffect(() => {
-    const el = listRef.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [messages, currentTool])
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (showSessions) { setShowSessions(false); return }
+        if (showProjects) { setShowProjects(false); return }
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        if (!running) setShowSessions(true)
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault()
+        if (!running) { newSession(); clearAttachments() }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [showSessions, showProjects, running, newSession, clearAttachments])
+
+  // 智能自动滚动：仅当用户贴底时才跟随，避免上滚查看历史被打断
+  useEffect(() => {
+    if (stickToBottom) scrollToBottom()
+  }, [messages, currentTool, stickToBottom, scrollToBottom])
+
+  // 切换会话时强制贴底
+  useEffect(() => {
+    setStickToBottom(true)
+    setShowScrollBtn(false)
+    requestAnimationFrame(() => scrollToBottom())
+  }, [sessionId, scrollToBottom])
 
   // 打开历史抽屉时刷新：按当前项目过滤
   useEffect(() => {
@@ -117,26 +168,40 @@ export default function Chat() {
   // 用 reverse+find 风格（无 useMemo），让 React Compiler 自动决定是否记忆化
   const tokenInfo = computeTokenInfo(messages)
 
-  const handleSubmit = async () => {
-    const text = input.trim()
-    if (!text && attachments.length === 0) return
-    setInput('')
+  /**
+   * 统一的提交分发：先走 Slash 命令解析，再决定是否发给 LLM
+   * 抽出后供两处调用：用户主动 Enter 提交、斜杠菜单立即提交
+   */
+  const submitText = useCallback(async (text: string, atts: typeof attachments) => {
+    if (!text && atts.length === 0) return
 
-    // 1) 先尝试 Slash 命令分发：状态控制型在前端就地完成；模板插入型把 input 改写后再发给 LLM
+    // 1) Slash 命令分发：状态控制型在前端就地完成；模板插入型把 input 改写后再发给 LLM
     if (text.startsWith('/')) {
       const res = await runSlashCommand(text)
       if (res.handled) {
         if (res.transformedInput) {
-          await sendMessage(res.transformedInput, attachments)
+          await sendMessage(res.transformedInput, atts)
           clearAttachments()
         }
         return
       }
     }
 
-    await sendMessage(text, attachments)
+    await sendMessage(text, atts)
     clearAttachments()
+  }, [runSlashCommand, sendMessage, clearAttachments])
+
+  const handleSubmit = async () => {
+    const text = input.trim()
+    if (!text && attachments.length === 0) return
+    setInput('')
+    await submitText(text, attachments)
   }
+
+  /** 斜杠菜单 immediate 命令的立即提交回调（如 /help、/compact） */
+  const handleInstantSubmit = useCallback((text: string) => {
+    void submitText(text.trim(), attachments)
+  }, [submitText, attachments])
 
   const handlePick = async (id: string) => {
     setShowSessions(false)
@@ -154,16 +219,23 @@ export default function Chat() {
     <div
       className={`chat ${dragOver ? 'drag-over' : ''}`}
       data-mode="agent"
-      onDragOver={(e) => {
+      onDragEnter={(e) => {
         e.preventDefault()
+        dragCounter.current++
         if (!dragOver) setDragOver(true)
       }}
+      onDragOver={(e) => { e.preventDefault() }}
       onDragLeave={(e) => {
         e.preventDefault()
-        if (e.target === e.currentTarget) setDragOver(false)
+        dragCounter.current--
+        if (dragCounter.current <= 0) {
+          dragCounter.current = 0
+          setDragOver(false)
+        }
       }}
       onDrop={async (e) => {
         e.preventDefault()
+        dragCounter.current = 0
         setDragOver(false)
         await addFilesFromDrop(e.dataTransfer.files)
       }}
@@ -185,7 +257,7 @@ export default function Chat() {
         {tokenInfo && (
           <div
             className="chat__token-stats"
-            title={`已用上下文：${tokenInfo.prompt.toLocaleString()} / ${tokenInfo.max.toLocaleString()} tokens`}
+            title={`已用上下文：${tokenInfo.prompt.toLocaleString()} / ${tokenInfo.max.toLocaleString()} tokens（${tokenInfo.ratio}%）`}
           >
             <span className="chat__token-label">🧠 Context</span>
             <div className="chat__token-bar-bg">
@@ -195,7 +267,10 @@ export default function Chat() {
                 data-warning={tokenInfo.ratio > 80}
               />
             </div>
-            <span className="chat__token-text">{tokenInfo.ratio}%</span>
+            <span className="chat__token-tokens">
+              {formatTokens(tokenInfo.prompt)}<span className="chat__token-sep">/</span>{formatTokens(tokenInfo.max)}
+            </span>
+            <span className="chat__token-text" data-warning={tokenInfo.ratio > 80}>{tokenInfo.ratio}%</span>
           </div>
         )}
         <div className="chat__actions">
@@ -210,7 +285,7 @@ export default function Chat() {
           >
             ＋ 新会话
           </button>
-          <button type="button" className="chat__btn" onClick={() => setShowSessions(true)}>
+          <button type="button" className="chat__btn" onClick={() => setShowSessions(true)} title="历史会话 (Cmd/Ctrl+K)" aria-label="历史会话">
             历史
           </button>
           <button type="button" className="chat__btn" onClick={openSkills} title="打开技能中心">🧩 技能</button>
@@ -229,13 +304,26 @@ export default function Chat() {
         </div>
       )}
 
-      <main className="chat__list" ref={listRef}>
+      <main className="chat__list" ref={listRef} onScroll={handleListScroll}>
         {messages.length === 0 ? (
-          <EmptyState />
+          <EmptyState onPick={(text) => { setInput(text); window.setTimeout(() => listRef.current?.focus(), 0) }} />
         ) : (
-          messages.map(m => <MessageItem key={m.id} message={m} />)
+          messages.map(m => <MessageItem key={m.id} message={m} onRegenerate={regenerate} canRegenerate={!running} />)
         )}
       </main>
+
+      {/* 回到底部悬浮按钮 */}
+      {showScrollBtn && (
+        <button
+          type="button"
+          className="chat__scroll-bottom"
+          onClick={() => scrollToBottom(true)}
+          aria-label="回到底部"
+          title="回到底部"
+        >
+          ↓
+        </button>
+      )}
 
       <footer className="chat__footer">
         {/* 附件列表 */}
@@ -247,6 +335,7 @@ export default function Chat() {
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
+          onInstantSubmit={handleInstantSubmit}
           onStop={stopGeneration}
           running={running}
           onPickFiles={pickFiles}
@@ -291,7 +380,7 @@ export default function Chat() {
 // ─────────────────────────────────────────────
 // 空状态（Agent 默认任务示例：编程 + 日常）
 // ─────────────────────────────────────────────
-function EmptyState() {
+function EmptyState({ onPick }: { onPick: (text: string) => void }) {
   const examples = [
     '扫描当前项目结构，列出主要模块',
     '帮我整理今天的待办，并写一段总结日志',
@@ -303,7 +392,17 @@ function EmptyState() {
       <div className="chat-empty__title">🐱 喵～我是能帮你写代码、跑工具的小小牛马</div>
       <div className="chat-empty__sub">描述任务，我会自动调用本地工具去执行 · 输入 <code>/help</code> 查看命令</div>
       <div className="chat-empty__examples">
-        {examples.map(e => <div key={e} className="chat-empty__example">{e}</div>)}
+        {examples.map(e => (
+          <button
+            key={e}
+            type="button"
+            className="chat-empty__example"
+            onClick={() => onPick(e)}
+            title="点击填入输入框"
+          >
+            {e}
+          </button>
+        ))}
       </div>
     </div>
   )
@@ -312,7 +411,11 @@ function EmptyState() {
 // ─────────────────────────────────────────────
 // 消息项
 // ─────────────────────────────────────────────
-function MessageItem({ message }: { message: UIChatMessage }) {
+function MessageItem({ message, onRegenerate, canRegenerate }: {
+  message: UIChatMessage
+  onRegenerate?: () => void
+  canRegenerate?: boolean
+}) {
   const copyText = getMessageCopyText(message)
 
   if (message.role === 'user') {
@@ -332,30 +435,50 @@ function MessageItem({ message }: { message: UIChatMessage }) {
             </div>
           )}
         </div>
+        {message.createdAt && <time className="chat-msg__time">{formatTime(message.createdAt)}</time>}
       </div>
     )
   }
 
   if (message.role === 'assistant') {
+    const isLastAssistant = onRegenerate != null
     return (
       <div className="chat-msg chat-msg--assistant">
         <div className="chat-msg__avatar">🐱</div>
         <div className="chat-msg__body">
-          {message.reasoning && <ReasoningBlock content={message.reasoning} />}
-          {message.toolRuns && message.toolRuns.length > 0 && (
-            <div className="chat-msg__tools">
-              {message.toolRuns.map(run => <ToolCallCard key={run.id} run={run} />)}
-            </div>
-          )}
-          {message.content && (
-            <div className="chat-msg__content">
-              <MessageCopyButton text={copyText} />
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-            </div>
-          )}
-          {message.streaming && !message.content && !message.toolRuns?.length && (
-            <div className="chat-msg__placeholder">
-              <span className="chat__spinner" /> 思考中...
+          <div className="chat-msg__card">
+            <MessageCopyButton text={copyText} />
+            {message.reasoning && <ReasoningBlock content={message.reasoning} />}
+            {message.toolRuns && message.toolRuns.length > 0 && (
+              <ToolRunsBlock runs={message.toolRuns} />
+            )}
+            {message.content && (
+              <div className="chat-msg__content">
+                <MarkdownRenderer content={message.content} />
+              </div>
+            )}
+            {message.streaming && !message.content && !message.toolRuns?.length && (
+              <div className="chat-msg__placeholder">
+                <span className="chat__spinner" /> 思考中...
+              </div>
+            )}
+          </div>
+          {/* 最后一条 assistant 且非流式时显示操作条 */}
+          {isLastAssistant && !message.streaming && message.iteration !== -1 && (
+            <div className="chat-msg__actions">
+              {canRegenerate && (
+                <button
+                  type="button"
+                  className="chat-msg__action-btn"
+                  onClick={() => onRegenerate?.()}
+                  disabled={!canRegenerate}
+                  title="重新生成最后一条回复"
+                >
+                  ↻ 重新生成
+                </button>
+              )}
+              <MessageCopyButton text={copyText} className="chat-msg__action-btn" />
+              {message.createdAt && <time className="chat-msg__time chat-msg__time--inline">{formatTime(message.createdAt)}</time>}
             </div>
           )}
         </div>
@@ -364,6 +487,12 @@ function MessageItem({ message }: { message: UIChatMessage }) {
   }
 
   return null
+}
+
+/** 格式化时间戳为 HH:MM */
+function formatTime(ts: number): string {
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 function getMessageCopyText(message: UIChatMessage): string {
@@ -382,6 +511,32 @@ function ReasoningBlock({ content }: { content: string }) {
       <summary>💭 推理过程（{content.length} 字）</summary>
       <pre className="chat-reasoning__pre">{content}</pre>
     </details>
+  )
+}
+
+// ─────────────────────────────────────────────
+// 工具调用块：带批量折叠 / 仅看失败过滤
+// ─────────────────────────────────────────────
+function ToolRunsBlock({ runs }: { runs: NonNullable<UIChatMessage['toolRuns']> }) {
+  const [filterFailed, setFilterFailed] = useState(false)
+  const visibleRuns = filterFailed ? runs.filter(r => r.status === 'error') : runs
+  const failedCount = runs.filter(r => r.status === 'error').length
+
+  return (
+    <div className="chat-msg__tools">
+      {runs.length >= 3 && (
+        <div className="chat-msg__tools-bar">
+          <span className="chat-msg__tools-count">🔧 {runs.length} 次工具调用{failedCount > 0 && ` · ${failedCount} 失败`}</span>
+          {failedCount > 0 && (
+            <label className="chat-msg__tools-filter">
+              <input type="checkbox" checked={filterFailed} onChange={e => setFilterFailed(e.target.checked)} />
+              仅看失败
+            </label>
+          )}
+        </div>
+      )}
+      {visibleRuns.map(run => <ToolCallCard key={run.id} run={run} />)}
+    </div>
   )
 }
 
@@ -461,7 +616,7 @@ function ProjectsDrawer({ projects, currentId, onClose, onSwitch, onReload }: {
       const name = newName.trim() || dirPath.split(/[\\/]/).pop() || '新项目'
       const res = await createProjectIPC({ name, path: dirPath, createDir: false })
       if (!res.ok) {
-        alert(`创建失败：${res.error}`)
+        await modalAlert(`创建失败：${res.error}`, '创建项目')
       } else {
         setNewName('')
         await onReload()
@@ -475,14 +630,14 @@ function ProjectsDrawer({ projects, currentId, onClose, onSwitch, onReload }: {
   const handleCreateDir = async () => {
     const name = newName.trim()
     if (!name) {
-      alert('请先输入项目名')
+      await modalAlert('请先输入项目名')
       return
     }
     setCreating(true)
     try {
       const res = await createProjectIPC({ name, createDir: true })
       if (!res.ok) {
-        alert(`创建失败：${res.error}`)
+        await modalAlert(`创建失败：${res.error}`, '创建项目')
       } else {
         setNewName('')
         await onReload()
@@ -493,7 +648,7 @@ function ProjectsDrawer({ projects, currentId, onClose, onSwitch, onReload }: {
   }
 
   const handleRename = async (p: Project) => {
-    const next = prompt(`重命名项目「${p.name}」`, p.name)
+    const next = await modalPrompt(`重命名项目「${p.name}」`, p.name, '重命名项目')
     if (!next) return
     await renameProjectIPC(p.id, next)
     await onReload()
@@ -501,20 +656,21 @@ function ProjectsDrawer({ projects, currentId, onClose, onSwitch, onReload }: {
 
   const handleDelete = async (p: Project) => {
     if (p.id === 'default') {
-      alert('默认项目不可删除')
+      await modalAlert('默认项目不可删除')
       return
     }
-    if (!confirm(`确认删除项目「${p.name}」吗？\n仅会移除索引，本地目录不会被删除；属于该项目的会话会归集到默认项目。`)) return
+    const ok = await modalConfirm(`确认删除项目「${p.name}」吗？\n仅会移除索引，本地目录不会被删除；属于该项目的会话会归集到默认项目。`, '删除项目', true)
+    if (!ok) return
     await deleteProjectIPC(p.id)
     await onReload()
   }
 
   return (
     <div className="chat-drawer" onClick={onClose}>
-      <div className="chat-drawer__panel" onClick={e => e.stopPropagation()}>
+      <div className="chat-drawer__panel" role="dialog" aria-modal="true" aria-label="项目管理" onClick={e => e.stopPropagation()}>
         <header className="chat-drawer__header">
           <div className="chat-drawer__title">项目管理</div>
-          <button type="button" className="chat-drawer__close" onClick={onClose}>×</button>
+          <button type="button" className="chat-drawer__close" onClick={onClose} aria-label="关闭">×</button>
         </header>
         <div className="chat-projects__create">
           <input
@@ -605,10 +761,10 @@ function SessionsDrawer({ sessions, currentId, onClose, onPick, onDelete }: {
 }) {
   return (
     <div className="chat-drawer" onClick={onClose}>
-      <div className="chat-drawer__panel" onClick={e => e.stopPropagation()}>
+      <div className="chat-drawer__panel" role="dialog" aria-modal="true" aria-label="历史会话" onClick={e => e.stopPropagation()}>
         <header className="chat-drawer__header">
           <div className="chat-drawer__title">历史会话</div>
-          <button type="button" className="chat-drawer__close" onClick={onClose}>×</button>
+          <button type="button" className="chat-drawer__close" onClick={onClose} aria-label="关闭">×</button>
         </header>
         <div className="chat-drawer__list">
           {sessions.length === 0 ? (

@@ -65,6 +65,8 @@ const DEFAULT_CONFIG: AppConfig = {
   agent_allowed_paths_extra: [],
   // Agent 推理强度：默认空（不发送 reasoning_effort 参数）
   agent_reasoning_effort: '',
+  // Agent 上下文窗口上限：默认 0（按模型名自动推断）
+  agent_context_window: 0,
 }
 
 // ── 配置 ──────────────────────────────────────

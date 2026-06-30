@@ -282,10 +282,35 @@ export function isCommandSafe(command: string): boolean {
  *  - defaultId / cancelId 都指向"拒绝"，避免用户误回车放行危险命令
  *  - 标题/正文清晰展示完整命令、工作目录、超时，让用户能审阅
  *  - 父窗口优先用当前聚焦窗口，fallback 到任一可见窗口
+ *  - 进程级串行队列：多个 Agent 会话并发触发 run_command 时，确认框依次弹出，
+ *    避免叠弹多个模态框互相阻塞（Electron 模态框并发会卡死焦点链）
  *
  * @returns 用户允许执行返回 true；拒绝或关闭对话框返回 false
  */
+// 确认队列：同一时刻只允许一个确认框展示，后续请求排队等待
+let confirmQueue: Promise<boolean> = Promise.resolve(true)
+
 export async function confirmCommandWithUser(params: {
+  command: string
+  workDir?: string
+  timeoutMs: number
+}): Promise<boolean> {
+  // 串行化：把本次确认挂到上一个确认的 then 链后，确保前一个对话框关闭后才弹下一个
+  // catch 兜底：即使 doConfirm 抛异常（如父窗口销毁），也返回 false 并保持队列链不断
+  const run = async (): Promise<boolean> => {
+    try {
+      return await doConfirmCommandWithUser(params)
+    } catch (err) {
+      console.warn('[Agent.security] 确认对话框异常，按拒绝处理:', err)
+      return false
+    }
+  }
+  confirmQueue = confirmQueue.then(run, run)
+  return confirmQueue
+}
+
+/** 实际弹出确认框的实现（不直接对外暴露，请用 confirmCommandWithUser 走队列） */
+async function doConfirmCommandWithUser(params: {
   command: string
   workDir?: string
   timeoutMs: number

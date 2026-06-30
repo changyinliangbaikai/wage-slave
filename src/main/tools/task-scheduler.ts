@@ -625,16 +625,10 @@ export function stopTaskScheduler(): void {
     powerMonitor.off('resume', handlePowerResume)
     powerResumeRegistered = false
   }
-  // 终止所有运行中的进程
+  // 终止所有运行中的进程（Agent 定时执行已迁移至 agent-cron 独立调度器，无需在此处理）
   for (const [id, child] of runningProcesses) {
     child.kill()
     runningProcesses.delete(id)
-    executionToTask.delete(id)
-  }
-  // 中止所有运行中的 Agent
-  for (const [id, agent] of runningAgents) {
-    agent.abort()
-    runningAgents.delete(id)
     executionToTask.delete(id)
   }
   console.log('[TaskScheduler] 调度引擎已停止')

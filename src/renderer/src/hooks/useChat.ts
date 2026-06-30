@@ -87,6 +87,8 @@ export interface UseChatResult {
   newSession: () => void
   loadSession: (id: string) => Promise<void>
   switchProject: (projectId: string) => void
+  /** 重新生成最后一条 assistant 回复：移除最后的 assistant 消息，重发上一条 user 消息 */
+  regenerate: () => Promise<void>
   /**
    * 解析 Slash 命令；
    * 返回 { handled: true, transformedInput? } 表示已处理：
@@ -108,8 +110,10 @@ export function useChat(): UseChatResult {
   // 事件回调里读最新值，避免闭包陷阱
   const sessionIdRef = useRef(sessionId)
   const projectIdRef = useRef(projectId)
+  const messagesRef = useRef(messages)
   useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
   useEffect(() => { projectIdRef.current = projectId }, [projectId])
+  useEffect(() => { messagesRef.current = messages }, [messages])
 
   // ── Agent：按 iteration 维护流式 assistant ──
   const upsertStreamingAssistant = useCallback((iteration: number, content: string, reasoning: string) => {
@@ -263,6 +267,22 @@ export function useChat(): UseChatResult {
     setMessages(prev => [...prev, msg])
   }, [])
 
+  /** 重新生成：移除最后一条 assistant 回复，用上一条 user 消息重新发送 */
+  const regenerate = useCallback(async () => {
+    if (running) return
+    // 从尾部找到最后一条 user 消息及其后的 assistant 回复
+    let lastUserIdx = -1
+    for (let i = messagesRef.current.length - 1; i >= 0; i--) {
+      if (messagesRef.current[i].role === 'user') { lastUserIdx = i; break }
+    }
+    if (lastUserIdx === -1) return
+    const userMsg = messagesRef.current[lastUserIdx]
+    // 截断到 user 消息之前（移除该 user 消息及其后所有 assistant 回复）
+    setMessages(prev => prev.slice(0, lastUserIdx))
+    // 重新发送同一条 user 消息
+    await sendMessage(userMsg.content, userMsg.attachments)
+  }, [running, sendMessage])
+
   /** 解析并执行 Slash 命令 */
   const runSlashCommand = useCallback(async (raw: string): Promise<{ handled: boolean; transformedInput?: string }> => {
     const trimmed = raw.trim()
@@ -295,11 +315,13 @@ ${arg || '(空)'}`
       case '/model': {
         if (!arg) {
           const cfg = await getAppConfig()
-          const cur = cfg.agent_llm_model || cfg.llm_model || '(未配置)'
-          appendSystemMessage(`当前模型：\`${cur}\`\n\n用法：\`/model <模型名>\` 切换 Agent 使用的模型`)
+          // 应用已合并为单一模型配置：优先读全局 llm_model；保留 agent_llm_model 兼容历史 config
+          const cur = (cfg.llm_model as string) || (cfg.agent_llm_model as string) || '(未配置)'
+          appendSystemMessage(`当前模型：\`${cur}\`\n\n用法：\`/model <模型名>\` 切换当前使用的模型`)
         } else {
-          const ok = await setAppConfig({ agent_llm_model: arg })
-          appendSystemMessage(ok ? `已切换 Agent 模型为：\`${arg}\`` : '切换模型失败')
+          // 写入全局 llm_model，所有模块都跟随生效
+          const ok = await setAppConfig({ llm_model: arg })
+          appendSystemMessage(ok ? `已切换模型为：\`${arg}\`` : '切换模型失败')
         }
         return { handled: true }
       }
@@ -431,7 +453,7 @@ ${arg || '(空)'}`
   return {
     sessionId, projectId, messages, running, fatalError, currentTool,
     sendMessage, stopGeneration, newSession, loadSession, switchProject,
-    runSlashCommand,
+    runSlashCommand, regenerate,
   }
 }
 

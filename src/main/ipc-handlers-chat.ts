@@ -59,18 +59,29 @@ export function registerChatIPC(): void {
     if (!params?.userInput || !params.userInput.trim()) {
       return { ok: false, error: '输入不能为空' }
     }
-    const { sessionId, mode } = params
+    const { sessionId } = params
 
-    // 同会话已有活跃实例 → 先中止
+    // 同会话已有活跃实例 → 先中止并立即从 Map 摘除，避免其异步 onDone/onError
+    // 回调把随后注册的新 service 误删（abort 是 fire-and-forget，旧回调仍会触发）
     const existing = active.get(sessionId)
-    if (existing) existing.abort()
+    if (existing) {
+      existing.abort()
+      active.delete(sessionId)
+    }
 
     const apiKey = await getStoredApiKey()
     const service = new DialogueService()
     active.set(sessionId, service)
 
-    // Agent 模式参与小猫活跃态（busy 动画）；chat 模式不影响
-    if (mode === 'agent') agentActivityStarted('chat')
+    // DialogueService 已统一升级为 Agent 执行（含工具调用），无论 mode 都参与小猫活跃态
+    // 早期 chat 单流模式已废弃，此处不再按 mode 区分，避免 chat 入口时小猫不切 busy
+    agentActivityStarted('chat')
+
+    // 回调里做 owner 校验：只有自己仍是 Map 中的 owner 时才删除，
+    // 防止被新一轮 CHAT_START 覆盖后旧回调把新 service 误删
+    const releaseIfOwner = (): void => {
+      if (active.get(sessionId) === service) active.delete(sessionId)
+    }
 
     service
       .start(params, apiKey, {
@@ -78,11 +89,11 @@ export function registerChatIPC(): void {
         onToolEvent: (p) => broadcast(IPC.CHAT_TOOL_EVENT, p),
         onDone: (p) => {
           broadcast(IPC.CHAT_DONE, p)
-          active.delete(sessionId)
+          releaseIfOwner()
         },
         onError: (p) => {
           broadcast(IPC.CHAT_ERROR, p)
-          if (p.fatal) active.delete(sessionId)
+          if (p.fatal) releaseIfOwner()
         },
       })
       .catch((err) => {
@@ -92,10 +103,10 @@ export function registerChatIPC(): void {
           error: err instanceof Error ? err.message : String(err),
           fatal: true,
         })
-        active.delete(sessionId)
+        releaseIfOwner()
       })
       .finally(() => {
-        if (mode === 'agent') agentActivityEnded('chat')
+        agentActivityEnded('chat')
       })
 
     return { ok: true, sessionId }
