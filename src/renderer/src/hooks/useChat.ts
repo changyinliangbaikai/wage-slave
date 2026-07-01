@@ -54,6 +54,32 @@ function genSessionId(): string {
   return `agent_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+function findLastUserIndex(messages: UIChatMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'user') return i
+  }
+  return -1
+}
+
+function withTokenUsage(
+  message: UIChatMessage,
+  iteration: number,
+  tokenUsage?: ChatToolEventPayload['tokenUsage'],
+): UIChatMessage {
+  if (!tokenUsage) return message
+  return {
+    ...message,
+    metadata: {
+      ...(message.metadata ?? {}),
+      iteration,
+      promptTokens: tokenUsage.promptTokens,
+      completionTokens: tokenUsage.completionTokens,
+      totalTokens: tokenUsage.totalTokens,
+      maxTokens: tokenUsage.maxTokens,
+    },
+  }
+}
+
 /** 工具调用 UI 状态（与 ToolCallCard 对齐） */
 export interface ToolRunUI {
   id: string
@@ -134,9 +160,16 @@ export function useChat(): UseChatResult {
     if (!buf) return
     streamingBufferRef.current = null
     setMessages(prev => {
-      const last = prev[prev.length - 1]
-      if (last?.role === 'assistant' && last.iteration === buf.iteration && last.streaming) {
-        return [...prev.slice(0, -1), { ...last, content: buf.content, reasoning: buf.reasoning }]
+      const turnStart = findLastUserIndex(prev)
+      for (let i = prev.length - 1; i > turnStart; i--) {
+        const m = prev[i]
+        if (m.role === 'assistant' && m.iteration === buf.iteration) {
+          return [
+            ...prev.slice(0, i),
+            { ...m, content: buf.content, reasoning: buf.reasoning || undefined, streaming: true },
+            ...prev.slice(i + 1),
+          ]
+        }
       }
       const closedPrev = prev.map(m => (m.streaming ? { ...m, streaming: false } : m))
       const next: UIChatMessage = {
@@ -161,7 +194,11 @@ export function useChat(): UseChatResult {
     }
   }, [flushStreamingNow])
 
-  const attachToolRuns = useCallback((iteration: number, toolCalls: NonNullable<ChatToolEventPayload['toolCalls']>) => {
+  const attachToolRuns = useCallback((
+    iteration: number,
+    toolCalls: NonNullable<ChatToolEventPayload['toolCalls']>,
+    tokenUsage?: ChatToolEventPayload['tokenUsage'],
+  ) => {
     const newRuns: ToolRunUI[] = toolCalls.map(tc => ({
       id: tc.id,
       name: tc.name,
@@ -171,13 +208,29 @@ export function useChat(): UseChatResult {
       status: 'pending',
     }))
     setMessages(prev => {
-      for (let i = prev.length - 1; i >= 0; i--) {
+      const turnStart = findLastUserIndex(prev)
+      for (let i = prev.length - 1; i > turnStart; i--) {
         const m = prev[i]
         if (m.role === 'assistant' && m.iteration === iteration) {
-          return [...prev.slice(0, i), { ...m, toolRuns: [...(m.toolRuns ?? []), ...newRuns] }, ...prev.slice(i + 1)]
+          const next = withTokenUsage({
+            ...m,
+            streaming: false,
+            toolRuns: [...(m.toolRuns ?? []), ...newRuns],
+          }, iteration, tokenUsage)
+          return [...prev.slice(0, i), next, ...prev.slice(i + 1)]
         }
       }
-      return prev
+      const closedPrev = prev.map(m => (m.streaming ? { ...m, streaming: false } : m))
+      const next = withTokenUsage({
+        id: genId('asst'),
+        role: 'assistant',
+        content: '',
+        createdAt: Date.now(),
+        toolRuns: newRuns,
+        streaming: false,
+        iteration,
+      }, iteration, tokenUsage)
+      return [...closedPrev, next]
     })
   }, [])
 
@@ -412,27 +465,8 @@ ${arg || '(空)'}`
       if (p.phase === 'start' && typeof p.iteration === 'number' && p.toolCalls) {
         // 工具开始前立即刷新流式缓冲，确保最后一波内容不丢失
         flushStreamingNow()
-        // 截断 Bug 修复：进入工具执行阶段时，立刻把上一轮 streaming 状态关闭，
-        // 同时把本轮 LLM 的 tokenUsage 写入对应 assistant 的 metadata（用于上下文进度条）
-        const iter = p.iteration
-        const tu = p.tokenUsage
-        setMessages(prev => prev.map(m => {
-          if (m.role !== 'assistant' || m.iteration !== iter) return m
-          const next: UIChatMessage = { ...m, streaming: false }
-          if (tu) {
-            next.metadata = {
-              ...(m.metadata ?? {}),
-              iteration: iter,
-              promptTokens: tu.promptTokens,
-              completionTokens: tu.completionTokens,
-              totalTokens: tu.totalTokens,
-              maxTokens: tu.maxTokens,
-              cacheHitTokens: tu.cacheHitTokens,
-            }
-          }
-          return next
-        }))
-        attachToolRuns(p.iteration, p.toolCalls)
+        // 工具事件只归属当前用户轮次；纯 tool_calls 流没有文本 chunk 时创建承载气泡。
+        attachToolRuns(p.iteration, p.toolCalls, p.tokenUsage)
       } else if (p.phase === 'executing' && p.toolId) {
         setCurrentTool(p.toolName ?? null)
         updateToolRun(p.toolId, { status: 'running' })
@@ -454,24 +488,43 @@ ${arg || '(空)'}`
       setRunning(false)
       setCurrentTool(null)
       setDoneAt(Date.now())
-      setMessages(prev => prev.map((m, idx) => {
-        // 收尾最后一条 streaming assistant；把最终的 tokenUsage 合并入 metadata
-        const isTarget = idx === prev.length - 1 && m.role === 'assistant' && m.streaming
-        if (!isTarget) return m
-        const tu = p.tokenUsage
-        const mergedMeta = tu
-          ? {
-              ...(m.metadata ?? {}),
-              iteration: tu.iteration ?? m.metadata?.iteration,
-              promptTokens: tu.promptTokens,
-              completionTokens: tu.completionTokens,
-              totalTokens: tu.totalTokens,
-              maxTokens: tu.maxTokens,
-              cacheHitTokens: tu.cacheHitTokens,
-            }
-          : m.metadata
-        return { ...m, streaming: false, content: p.content || m.content, reasoning: p.reasoning ?? m.reasoning, metadata: mergedMeta }
-      }))
+      setMessages(prev => {
+        const turnStart = findLastUserIndex(prev)
+        for (let i = prev.length - 1; i > turnStart; i--) {
+          const m = prev[i]
+          if (m.role !== 'assistant' || !m.streaming) continue
+          const iteration = p.tokenUsage?.iteration ?? m.iteration
+          const next = typeof iteration === 'number'
+            ? withTokenUsage({
+                ...m,
+                streaming: false,
+                content: p.content || m.content,
+                reasoning: p.reasoning ?? m.reasoning,
+              }, iteration, p.tokenUsage)
+            : {
+                ...m,
+                streaming: false,
+                content: p.content || m.content,
+                reasoning: p.reasoning ?? m.reasoning,
+              }
+          return [...prev.slice(0, i), next, ...prev.slice(i + 1)]
+        }
+        if (!p.content && !p.reasoning) return prev.map(m => (m.streaming ? { ...m, streaming: false } : m))
+        const iteration = p.tokenUsage?.iteration
+        const fallback: UIChatMessage = {
+          id: genId('asst'),
+          role: 'assistant',
+          content: p.content,
+          reasoning: p.reasoning,
+          createdAt: Date.now(),
+          streaming: false,
+          ...(typeof iteration === 'number' ? { iteration } : {}),
+        }
+        const withMeta = typeof iteration === 'number'
+          ? withTokenUsage(fallback, iteration, p.tokenUsage)
+          : fallback
+        return [...prev.map(m => (m.streaming ? { ...m, streaming: false } : m)), withMeta]
+      })
     }) as (...a: unknown[]) => void)
 
     const offError = api.on(IPC.CHAT_ERROR, ((p: ChatErrorPayload) => {

@@ -63,27 +63,30 @@ export function registerChatIPC(): void {
 
     // 同会话已有活跃实例 → 先中止并立即从 Map 摘除，避免其异步 onDone/onError
     // 回调把随后注册的新 service 误删（abort 是 fire-and-forget，旧回调仍会触发）
-    const existing = active.get(sessionId)
-    if (existing) {
-      existing.abort()
+    const activeService = active.get(sessionId)
+    if (activeService) {
+      activeService.abort()
       active.delete(sessionId)
     }
 
-    // 立即创建占位会话写入磁盘，让渲染进程 sidebar 能马上看到新会话
-    const now = Date.now()
-    const placeholderTitle = params.userInput.trim().slice(0, 24) || '新会话'
-    const placeholderPreview = params.userInput.trim().replace(/\s+/g, ' ').slice(0, 80)
-    saveAgentSession({
-      id: sessionId,
-      title: placeholderTitle,
-      createdAt: now,
-      updatedAt: now,
-      messageCount: 0,
-      preview: placeholderPreview,
-      messages: [],
-      projectId: params.projectId ?? 'default',
-      stats: { iterations: 0, toolCalls: 0, totalDurationMs: 0 },
-    })
+    // 仅新会话需要立即写占位，避免同一会话后续轮次把既有历史覆盖为空。
+    const storedSession = getAgentSession(sessionId)
+    if (!storedSession) {
+      const now = Date.now()
+      const placeholderTitle = params.userInput.trim().slice(0, 24) || '新会话'
+      const placeholderPreview = params.userInput.trim().replace(/\s+/g, ' ').slice(0, 80)
+      saveAgentSession({
+        id: sessionId,
+        title: placeholderTitle,
+        createdAt: now,
+        updatedAt: now,
+        messageCount: 0,
+        preview: placeholderPreview,
+        messages: [],
+        projectId: params.projectId ?? 'default',
+        stats: { iterations: 0, toolCalls: 0, totalDurationMs: 0 },
+      })
+    }
 
     const apiKey = await getStoredApiKey()
     const service = new DialogueService()
