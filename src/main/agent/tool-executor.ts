@@ -738,9 +738,7 @@ async function toolRunCommand(args: unknown, signal?: AbortSignal, projectCwd?: 
   })
 
   const result = await spawnShellCommand(command, { cwd, timeoutMs: timeout, maxBuffer: MAX_COMMAND_BUFFER }, signal)
-  const out = decodeProcessOutput(result.stdout)
-  const err = decodeProcessOutput(result.stderr)
-  const combined = [out, err].filter(Boolean).join('\n').trim()
+  const combined = decodeProcessOutput(result.output).trim()
   if (result.timedOut) {
     throw new Error(`命令超时（${timeout}ms）：${combined || preview(command, 120)}`)
   }
@@ -761,8 +759,7 @@ interface SpawnCommandOptions {
 }
 
 interface SpawnCommandResult {
-  stdout: Buffer
-  stderr: Buffer
+  output: Buffer
   code: number | null
   signal: NodeJS.Signals | null
   timedOut: boolean
@@ -803,7 +800,7 @@ function spawnShellCommand(
   return new Promise((resolve, reject) => {
     const isWin = process.platform === 'win32'
     const shell = isWin ? 'cmd.exe' : '/bin/sh'
-    const shellArgs = isWin ? ['/d', '/s', '/c', command] : ['-c', command]
+    const shellArgs = isWin ? ['/c', command] : ['-c', command]
     const child = spawn(shell, shellArgs, {
       cwd: options.cwd,
       detached: true,
@@ -818,10 +815,8 @@ function spawnShellCommand(
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
-    const stdoutChunks: Buffer[] = []
-    const stderrChunks: Buffer[] = []
-    let stdoutBytes = 0
-    let stderrBytes = 0
+    const outputChunks: Buffer[] = []
+    let outputBytes = 0
     let timedOut = false
     let exceededBuffer = false
     let isFinished = false
@@ -863,15 +858,15 @@ function spawnShellCommand(
 
     child.stdout?.on('data', (chunk: Buffer) => {
       if (isFinished) return
-      stdoutChunks.push(chunk)
-      stdoutBytes += chunk.length
-      if (stdoutBytes + stderrBytes > options.maxBuffer) killForLimit()
+      outputChunks.push(chunk)
+      outputBytes += chunk.length
+      if (outputBytes > options.maxBuffer) killForLimit()
     })
     child.stderr?.on('data', (chunk: Buffer) => {
       if (isFinished) return
-      stderrChunks.push(chunk)
-      stderrBytes += chunk.length
-      if (stdoutBytes + stderrBytes > options.maxBuffer) killForLimit()
+      outputChunks.push(chunk)
+      outputBytes += chunk.length
+      if (outputBytes > options.maxBuffer) killForLimit()
     })
     child.on('error', err => {
       if (isFinished) return
@@ -882,8 +877,7 @@ function spawnShellCommand(
       if (isFinished) return
       cleanUp()
       resolve({
-        stdout: Buffer.concat(stdoutChunks),
-        stderr: Buffer.concat(stderrChunks),
+        output: Buffer.concat(outputChunks),
         code,
         signal: signalName,
         timedOut,
