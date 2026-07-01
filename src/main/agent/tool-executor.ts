@@ -243,10 +243,10 @@ async function toolReadFile(args: unknown, cwd?: string): Promise<string> {
   return [note, lines.join('\n')].join('\n')
 }
 
-interface WriteFileArgs { path: string; content: string }
+interface WriteFileArgs { path: string; content?: string }
 
 async function toolWriteFile(args: unknown, cwd?: string): Promise<string> {
-  const { path: p, content } = pickArgs<WriteFileArgs>(args, ['path', 'content'])
+  const { path: p, content = '' } = pickArgs<WriteFileArgs>(args, ['path'])
   const target = resolvePath(p, cwd)
   assertSafePath(target, cwd)
   await fs.mkdir(path.dirname(target), { recursive: true })
@@ -257,7 +257,9 @@ async function toolWriteFile(args: unknown, cwd?: string): Promise<string> {
     target,
     summary: `写入 ${content.length} 字符`,
   })
-  return `已写入: ${target}（${content.length} 字符）`
+  return content.length === 0
+    ? `已创建空文件: ${target}`
+    : `已写入: ${target}（${content.length} 字符）`
 }
 
 interface EditFileArgs { path: string; old_string: string; new_string: string; replace_all?: boolean }
@@ -799,11 +801,20 @@ function spawnShellCommand(
   signal?: AbortSignal,
 ): Promise<SpawnCommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, {
+    const isWin = process.platform === 'win32'
+    const shell = isWin ? 'cmd.exe' : '/bin/sh'
+    const shellArgs = isWin ? ['/d', '/s', '/c', command] : ['-c', command]
+    const child = spawn(shell, shellArgs, {
       cwd: options.cwd,
-      shell: true,
       detached: true,
       windowsHide: true,
+      env: {
+        ...process.env,
+        ...(isWin && {
+          PYTHONIOENCODING: 'utf-8',
+          PYTHONUTF8: '1',
+        }),
+      },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 

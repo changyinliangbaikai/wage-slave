@@ -48,14 +48,14 @@ export const AGENT_TOOL_SCHEMAS: ToolSchema[] = [
     type: 'function',
     function: {
       name: 'write_file',
-      description: '写入内容到文件。文件存在则覆盖，不存在则创建（自动建父目录）。仅允许写入路径白名单内的位置。',
+      description: '写入内容到文件。文件存在则覆盖，不存在则创建（自动建父目录）。content 可传空字符串创建空文件。仅允许写入路径白名单内的位置。',
       parameters: {
         type: 'object',
         properties: {
           path: { type: 'string', description: '文件路径' },
-          content: { type: 'string', description: '要写入的完整内容' },
+          content: { type: 'string', description: '要写入的完整内容，传空字符串则创建空文件' },
         },
-        required: ['path', 'content'],
+        required: ['path'],
       },
     },
   },

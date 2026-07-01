@@ -53,6 +53,10 @@ export function registerChatIPC(): void {
 
   // 打开统一对话窗口
   ipcMain.on(IPC.CHAT_OPEN_WINDOW, () => openChatWindow())
+  ipcMain.on(IPC.CHAT_CLOSE_WINDOW, () => {
+    const win = getChatWindow()
+    if (win && !win.isDestroyed()) win.close()
+  })
 
   // 发起一次对话（chat / agent）
   ipcMain.handle(IPC.CHAT_START, async (_e, params: ChatStartParams): Promise<ChatStartResult> => {

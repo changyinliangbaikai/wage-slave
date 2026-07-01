@@ -184,6 +184,7 @@ export const IPC = {
   CHAT_START:           'renderer:chat-start',           // 发起对话（chat / agent 模式自动分流）
   CHAT_STOP:            'renderer:chat-stop',            // 中止当前对话
   CHAT_OPEN_WINDOW:     'renderer:chat-open-window',     // 打开统一对话窗口
+  CHAT_CLOSE_WINDOW:    'renderer:chat-close-window',    // 关闭统一对话窗口
   CHAT_LIST_SESSIONS:   'renderer:chat-list-sessions',   // 列出全部会话（合并 chat + agent）
   CHAT_GET_SESSION:     'renderer:chat-get-session',     // 读取一条完整会话
   CHAT_SAVE_SESSION:    'renderer:chat-save-session',    // 保存/更新一条会话

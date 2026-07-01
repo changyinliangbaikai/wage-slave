@@ -189,6 +189,10 @@ export async function startChat(
         stream: true,
         // 要求服务端在最后一个 chunk 中返回 usage（OpenAI / 多数兼容服务均支持）
         stream_options: { include_usage: true },
+        // 可选的 reasoning_effort：仅对支持的模型生效，留空时不发送
+        ...(config.agent_reasoning_effort === 'low' || config.agent_reasoning_effort === 'medium' || config.agent_reasoning_effort === 'high' || config.agent_reasoning_effort === 'max'
+          ? { reasoning_effort: config.agent_reasoning_effort, allowed_openai_params: ['reasoning_effort'] }
+          : {}),
       }),
       signal: controller.signal,
     })

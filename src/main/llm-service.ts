@@ -143,6 +143,10 @@ export async function parsePlan(input: string, apiKey: string): Promise<{ todos:
         ],
         temperature: 0.2,
         max_tokens: 800,
+        // 可选的 reasoning_effort：仅对支持的模型生效，留空时不发送
+        ...(config.agent_reasoning_effort === 'low' || config.agent_reasoning_effort === 'medium' || config.agent_reasoning_effort === 'high' || config.agent_reasoning_effort === 'max'
+          ? { reasoning_effort: config.agent_reasoning_effort, allowed_openai_params: ['reasoning_effort'] }
+          : {}),
       }),
       signal: AbortSignal.timeout(60000),
     })
@@ -234,6 +238,10 @@ export async function generateSummary(
         temperature: 0.5,
         max_tokens: 2000,
         stream: true,
+        // 可选的 reasoning_effort：仅对支持的模型生效，留空时不发送
+        ...(config.agent_reasoning_effort === 'low' || config.agent_reasoning_effort === 'medium' || config.agent_reasoning_effort === 'high' || config.agent_reasoning_effort === 'max'
+          ? { reasoning_effort: config.agent_reasoning_effort, allowed_openai_params: ['reasoning_effort'] }
+          : {}),
       }),
       signal: AbortSignal.timeout(60000),
     })

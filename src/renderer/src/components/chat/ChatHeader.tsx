@@ -82,6 +82,10 @@ export default function ChatHeader({
     setShowEffortMenu(false)
   }
 
+  const handleCloseWindow = () => {
+    window.electronAPI.send(IPC.CHAT_CLOSE_WINDOW)
+  }
+
   const effortLabels: Record<string, string> = {
     '': '关闭',
     'low': '低',
@@ -233,6 +237,16 @@ export default function ChatHeader({
             </div>
           )}
         </div>
+
+        <button
+          type="button"
+          className="codex-header__window-close"
+          onClick={handleCloseWindow}
+          aria-label="关闭窗口"
+          title="关闭"
+        >
+          ×
+        </button>
       </div>
     </header>
   )

@@ -154,6 +154,7 @@ export async function streamLLMWithTools(params: StreamLLMParams): Promise<Strea
   const effort = config.agent_reasoning_effort
   if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'max') {
     body.reasoning_effort = effort
+    body.allowed_openai_params = ['reasoning_effort']
   }
 
   log.info(`[AgentLLM] 发起请求 model=${model} messages=${params.messages.length} tools=${params.tools.length} effort=${effort || '-'}`)
@@ -344,6 +345,13 @@ async function streamLLMReactFallback(params: StreamLLMParams, originalError: st
     max_tokens: params.maxTokens ?? 4096,
     stream: true,
     stream_options: { include_usage: true }
+  }
+
+  // 可选的 reasoning_effort：仅对支持的模型生效，留空时不发送
+  const effort = config.agent_reasoning_effort
+  if (effort === 'low' || effort === 'medium' || effort === 'high' || effort === 'max') {
+    body.reasoning_effort = effort
+    body.allowed_openai_params = ['reasoning_effort']
   }
 
   let res: Response

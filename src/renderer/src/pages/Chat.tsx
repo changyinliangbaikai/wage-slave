@@ -436,6 +436,15 @@ export default function Chat() {
                 <h2 className="codex-header__title">设置中心</h2>
               </div>
               <div className="codex-header__drag-area" />
+              <button
+                type="button"
+                className="codex-header__window-close"
+                onClick={() => window.electronAPI.send(IPC.CHAT_CLOSE_WINDOW)}
+                aria-label="关闭窗口"
+                title="关闭"
+              >
+                ×
+              </button>
             </header>
             
             {/* 设置表单内嵌滚动容器 */}
@@ -458,6 +467,5 @@ export default function Chat() {
     </div>
   )
 }
-
 
 
