@@ -116,6 +116,11 @@
   justify-content: flex-end;
 }
 
+.settings-version {
+  font-size: 13px;
+  color: #5a3a1a;
+}
+
 .btn-save {
   padding: 8px 24px;
   background: #d4874a;

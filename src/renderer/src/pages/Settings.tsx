@@ -290,6 +290,14 @@ export default function Settings() {
         </div>
       </section>
 
+      <section className="settings-section">
+        <h2>关于</h2>
+        <div className="field-row">
+          <label>当前版本</label>
+          <span className="settings-version">v{__APP_VERSION__}</span>
+        </div>
+      </section>
+
       <div className="settings-footer">
         <button className="btn-save" onClick={handleSave} disabled={saving}>
           {saving ? '保存中...' : '保存设置'}

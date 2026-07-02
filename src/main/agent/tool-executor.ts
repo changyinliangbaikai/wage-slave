@@ -783,6 +783,8 @@ function buildTrackedShellCommand(command: string, cwdFile: string, isPowerShell
     const quotedCwdFile = quoteForPowerShell(cwdFile)
     return [
       '& {',
+      '  [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+      '  $OutputEncoding = [Console]::OutputEncoding',
       "  $ErrorActionPreference = 'Continue'",
       '  $__exitCode = 0',
       '  try {',
@@ -927,6 +929,58 @@ interface SpawnCommandResult {
   timedOutDueToPrompt: boolean
 }
 
+async function openCommandOutputFile(filePath: string): Promise<fs.FileHandle> {
+  if (process.platform === 'win32') {
+    return fs.open(filePath, 'w')
+  }
+
+  const noFollow = fsSync.constants.O_NOFOLLOW ?? 0
+  return fs.open(
+    filePath,
+    fsSync.constants.O_WRONLY |
+      fsSync.constants.O_CREAT |
+      fsSync.constants.O_APPEND |
+      noFollow,
+  )
+}
+
+function readFileRangeSync(filePath: string, maxBytes: number): Buffer {
+  const fd = fsSync.openSync(filePath, 'r')
+  try {
+    const stats = fsSync.fstatSync(fd)
+    const bytesToRead = Math.min(stats.size, maxBytes)
+    const output = Buffer.allocUnsafe(bytesToRead)
+    let totalRead = 0
+    while (totalRead < bytesToRead) {
+      const bytesRead = fsSync.readSync(fd, output, totalRead, bytesToRead - totalRead, totalRead)
+      if (bytesRead === 0) break
+      totalRead += bytesRead
+    }
+    return totalRead === output.length ? output : output.subarray(0, totalRead)
+  } finally {
+    fsSync.closeSync(fd)
+  }
+}
+
+function tailFileSync(filePath: string, maxBytes: number): Buffer {
+  const fd = fsSync.openSync(filePath, 'r')
+  try {
+    const stats = fsSync.fstatSync(fd)
+    const bytesToRead = Math.min(stats.size, maxBytes)
+    const output = Buffer.allocUnsafe(bytesToRead)
+    const start = Math.max(0, stats.size - bytesToRead)
+    let totalRead = 0
+    while (totalRead < bytesToRead) {
+      const bytesRead = fsSync.readSync(fd, output, totalRead, bytesToRead - totalRead, start + totalRead)
+      if (bytesRead === 0) break
+      totalRead += bytesRead
+    }
+    return totalRead === output.length ? output : output.subarray(0, totalRead)
+  } finally {
+    fsSync.closeSync(fd)
+  }
+}
+
 /** 安全地杀死子进程及其派生的所有子子进程 */
 function killProcess(child: ChildProcess): void {
   const pid = child.pid
@@ -962,13 +1016,29 @@ async function spawnShellCommand(
   const resolvedShellConf = shellConf ?? await getShellConfig()
   const shell = resolvedShellConf.shell
   const shellArgs = [...resolvedShellConf.argsPrefix, command]
-
-  // I/O 直接落盘：创建临时输出文件，避免 V8 内存占用与阻塞
+  // I/O 直接落盘：Windows 按 Claude 的做法用 'w' 打开，避免 MSYS2/Cygwin
+  // 将 append-only 句柄误判为只读后丢弃输出；POSIX 继续使用 append + no-follow。
   const outputFilePath = path.join(
     os.tmpdir(),
     `wage-slave-out-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   )
-  const outFd = fsSync.openSync(outputFilePath, 'w')
+  const outputHandle = await openCommandOutputFile(outputFilePath)
+  let outputHandleClosePromise: Promise<void> | null = null
+  const closeOutputHandle = () => {
+    outputHandleClosePromise ??= outputHandle.close().catch(() => {
+      // The child has its own duplicated handle; close failures here should not
+      // turn a successfully spawned command into a launch failure.
+    })
+    return outputHandleClosePromise
+  }
+
+  const unlinkOutputFileAfterClose = () => {
+    void closeOutputHandle().then(() => {
+      try {
+        fsSync.unlinkSync(outputFilePath)
+      } catch {}
+    })
+  }
 
   return new Promise((resolve, reject) => {
     const child = spawn(shell, shellArgs, {
@@ -983,8 +1053,10 @@ async function spawnShellCommand(
           PYTHONUTF8: '1',
         }),
       },
-      stdio: ['ignore', outFd, outFd], // stdout/stderr 直接导向文件描述符
+      stdio: ['pipe', outputHandle.fd, outputHandle.fd],
     })
+
+    child.stdin?.end()
 
     let timedOut = false
     let exceededBuffer = false
@@ -1000,12 +1072,10 @@ async function spawnShellCommand(
       if (signal && onAbort) {
         signal.removeEventListener('abort', onAbort)
       }
-      try {
-        fsSync.closeSync(outFd)
-      } catch {}
     }
 
     const killForLimit = () => {
+      if (exceededBuffer) return
       exceededBuffer = true
       killProcess(child)
     }
@@ -1046,13 +1116,8 @@ async function spawnShellCommand(
         // 2. 挂起卡死看门狗
         if (currentSize === lastSize) {
           if (Date.now() - lastGrowthTime > 5000) {
-            const readLen = Math.min(1024, currentSize)
-            if (readLen > 0) {
-              const fd = fsSync.openSync(outputFilePath, 'r')
-              const buffer = Buffer.alloc(readLen)
-              fsSync.readSync(fd, buffer, 0, readLen, currentSize - readLen)
-              fsSync.closeSync(fd)
-
+            if (currentSize > 0) {
+              const buffer = tailFileSync(outputFilePath, 1024)
               const tail = decodeProcessOutput(buffer)
               if (looksLikePrompt(tail)) {
                 timedOutDueToPrompt = true
@@ -1072,9 +1137,7 @@ async function spawnShellCommand(
       if (signal.aborted) {
         cleanUp()
         killProcess(child)
-        try {
-          fsSync.unlinkSync(outputFilePath)
-        } catch {}
+        unlinkOutputFileAfterClose()
         reject(new Error('Command aborted'))
         return
       }
@@ -1082,9 +1145,7 @@ async function spawnShellCommand(
         if (isFinished) return
         cleanUp()
         killProcess(child)
-        try {
-          fsSync.unlinkSync(outputFilePath)
-        } catch {}
+        unlinkOutputFileAfterClose()
         reject(new Error('Command aborted'))
       }
       signal.addEventListener('abort', onAbort, { once: true })
@@ -1093,29 +1154,33 @@ async function spawnShellCommand(
     child.on('error', err => {
       if (isFinished) return
       cleanUp()
-      try {
-        fsSync.unlinkSync(outputFilePath)
-      } catch {}
+      unlinkOutputFileAfterClose()
       reject(err)
     })
 
-    child.on('close', (code, signalName) => {
+    child.on('exit', (code, signalName) => {
       if (isFinished) return
       cleanUp()
       let output = Buffer.alloc(0)
-      try {
-        output = fsSync.readFileSync(outputFilePath)
-        fsSync.unlinkSync(outputFilePath)
-      } catch {}
-      resolve({
-        output,
-        code,
-        signal: signalName,
-        timedOut,
-        exceededBuffer,
-        timedOutDueToPrompt,
+      void closeOutputHandle().then(() => {
+        try {
+          const finalSize = fsSync.statSync(outputFilePath).size
+          if (finalSize > options.maxBuffer) exceededBuffer = true
+          output = readFileRangeSync(outputFilePath, options.maxBuffer)
+          fsSync.unlinkSync(outputFilePath)
+        } catch {}
+        resolve({
+          output,
+          code,
+          signal: signalName,
+          timedOut,
+          exceededBuffer,
+          timedOutDueToPrompt,
+        })
       })
     })
+
+    void closeOutputHandle()
   })
 }
 
