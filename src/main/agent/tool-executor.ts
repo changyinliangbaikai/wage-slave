@@ -11,12 +11,13 @@
  *  - 命令编码：复用 task-scheduler 的 decodeProcessOutput 思路
  */
 
-import { spawn, type ChildProcess } from 'child_process'
+import { spawn, spawnSync, type ChildProcess } from 'child_process'
 import * as fs from 'fs/promises'
 import * as fsSync from 'fs'
 import * as path from 'path'
 import * as readline from 'readline'
 import * as iconv from 'iconv-lite'
+import * as os from 'os'
 import log from 'electron-log/main'
 import { shell, BrowserWindow } from 'electron'
 import { IPC } from '@shared/ipc-channels'
@@ -115,6 +116,7 @@ export async function executeTool(
     }
 
     let raw: string
+    let updatedCwd: string | undefined
     switch (call.name) {
       // 文件操作
       case 'read_file':    raw = await toolReadFile(call.arguments, cwd); break
@@ -132,7 +134,12 @@ export async function executeTool(
       case 'web_fetch':    raw = await toolWebFetch(call.arguments); break
       case 'web_search':   raw = await toolWebSearch(call.arguments); break
       // 命令执行
-      case 'run_command':  raw = await toolRunCommand(call.arguments, signal, cwd); break
+      case 'run_command': {
+        const res = await toolRunCommand(call.arguments, signal, cwd)
+        raw = res.output
+        updatedCwd = res.updatedCwd
+        break
+      }
       // 小牛马数据操作
       case 'get_today_log':  raw = await toolGetTodayLog(); break
       case 'get_todos':      raw = await toolGetTodos(); break
@@ -178,6 +185,7 @@ export async function executeTool(
       toolName: call.name,
       output: truncate(raw),
       durationMs: elapsed,
+      updatedCwd,
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
@@ -699,7 +707,122 @@ async function toolWebSearch(args: unknown): Promise<string> {
 
 interface RunCommandArgs { command: string; work_dir?: string; timeout_ms?: number }
 
-async function toolRunCommand(args: unknown, signal?: AbortSignal, projectCwd?: string): Promise<string> {
+/**
+ * 自动探测可用 Shell
+ */
+async function findSuitableShell(): Promise<string> {
+  if (process.env.CLAUDE_CODE_SHELL && isExecutable(process.env.CLAUDE_CODE_SHELL)) {
+    return process.env.CLAUDE_CODE_SHELL
+  }
+  const envShell = process.env.SHELL
+  if (envShell && (envShell.includes('bash') || envShell.includes('zsh')) && isExecutable(envShell)) {
+    return envShell
+  }
+  const candidates = [
+    '/bin/zsh',
+    '/bin/bash',
+    '/usr/bin/zsh',
+    '/usr/bin/bash',
+    '/usr/local/bin/zsh',
+    '/usr/local/bin/bash'
+  ]
+  for (const c of candidates) {
+    if (isExecutable(c)) return c
+  }
+  return '/bin/sh'
+}
+
+function isExecutable(filePath: string): boolean {
+  try {
+    fsSync.accessSync(filePath, fsSync.constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 获取 Shell 基础配置
+ */
+interface ShellConfig {
+  shell: string
+  argsPrefix: string[]
+  isPowerShell: boolean
+}
+
+async function getShellConfig(): Promise<ShellConfig> {
+  const isWin = process.platform === 'win32'
+  if (isWin) {
+    const pwshProbe = spawnSync('pwsh', ['--version'], { stdio: 'ignore' })
+    const shell = pwshProbe.status === 0 ? 'pwsh' : 'powershell.exe'
+    return {
+      shell,
+      argsPrefix: ['-NoProfile', '-NonInteractive', '-Command'],
+      isPowerShell: true
+    }
+  } else {
+    const shell = await findSuitableShell()
+    return {
+      shell,
+      argsPrefix: ['-c'],
+      isPowerShell: false
+    }
+  }
+}
+
+function quoteForPosixShell(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function quoteForPowerShell(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
+}
+
+function buildTrackedShellCommand(command: string, cwdFile: string, isPowerShell: boolean): string {
+  if (isPowerShell) {
+    const quotedCwdFile = quoteForPowerShell(cwdFile)
+    return [
+      '& {',
+      "  $ErrorActionPreference = 'Continue'",
+      '  $__exitCode = 0',
+      '  try {',
+      command,
+      '    if ($LASTEXITCODE -is [int]) { $__exitCode = $LASTEXITCODE } elseif (-not $?) { $__exitCode = 1 }',
+      '  } finally {',
+      '    $__cwd = (Get-Location).Path',
+      `    [System.IO.File]::WriteAllText(${quotedCwdFile}, $__cwd)`,
+      '  }',
+      '  exit $__exitCode',
+      '}',
+    ].join('\n')
+  }
+
+  const quotedCwdFile = quoteForPosixShell(cwdFile)
+  return [
+    'if [ -n "${BASH_VERSION:-}" ]; then',
+    '  shopt -u extglob 2>/dev/null || true',
+    'elif [ -n "${ZSH_VERSION:-}" ]; then',
+    '  setopt NO_EXTENDED_GLOB 2>/dev/null || true',
+    'fi',
+    `__wage_slave_cwd_file=${quotedCwdFile}`,
+    '__wage_slave_write_cwd() {',
+    '  pwd -P > "$__wage_slave_cwd_file" 2>/dev/null || true',
+    '}',
+    '__exit_code=0',
+    '__wage_slave_command_finished=0',
+    'trap \'__wage_slave_trap_status=$?; if [ "$__wage_slave_command_finished" -eq 0 ]; then __exit_code=$__wage_slave_trap_status; fi; __wage_slave_write_cwd; exit $__exit_code\' EXIT',
+    command,
+    '__exit_code=$?',
+    '__wage_slave_command_finished=1',
+    'exit $__exit_code',
+  ].join('\n')
+}
+
+async function toolRunCommand(
+  args: unknown,
+  signal?: AbortSignal,
+  projectCwd?: string
+): Promise<{ output: string; updatedCwd?: string }> {
   const { command, work_dir, timeout_ms } = pickArgs<RunCommandArgs>(args, ['command'])
 
   // 安全分级：黑名单命令需用户确认，安全命令直接执行
@@ -737,8 +860,41 @@ async function toolRunCommand(args: unknown, signal?: AbortSignal, projectCwd?: 
     summary: preview(command, 200),
   })
 
-  const result = await spawnShellCommand(command, { cwd, timeoutMs: timeout, maxBuffer: MAX_COMMAND_BUFFER }, signal)
+  // CWD 追踪：生成唯一的临时 CWD 文件路径
+  const cwdFile = path.join(
+    os.tmpdir(),
+    `wage-slave-cwd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  )
+
+  // 封装原始命令，以追踪执行后的工作目录，同时向外透传原始 exit code
+  const shellConf = await getShellConfig()
+  const wrappedCommand = buildTrackedShellCommand(command, cwdFile, shellConf.isPowerShell)
+
+  const result = await spawnShellCommand(wrappedCommand, { cwd, timeoutMs: timeout, maxBuffer: MAX_COMMAND_BUFFER }, signal, shellConf)
   const combined = decodeProcessOutput(result.output).trim()
+
+  // 读取并更新工作目录
+  let updatedCwd: string | undefined
+  try {
+    if (fsSync.existsSync(cwdFile)) {
+      const readCwd = fsSync.readFileSync(cwdFile, 'utf-8').trim()
+      if (readCwd) {
+        updatedCwd = shellConf.isPowerShell ? path.resolve(readCwd) : readCwd.normalize('NFC')
+        // 安全性二次校验：确保切换后的工作目录也在安全白名单内
+        assertSafePath(updatedCwd, projectCwd)
+      }
+      fsSync.unlinkSync(cwdFile)
+    }
+  } catch (err) {
+    console.warn(`[Agent.tool] CWD 追踪读取或验证失败:`, err)
+    try {
+      if (fsSync.existsSync(cwdFile)) fsSync.unlinkSync(cwdFile)
+    } catch {}
+  }
+
+  if (result.timedOutDueToPrompt) {
+    throw new Error(`命令疑似因等待交互式键盘输入而挂起。最后输出：\n${combined.slice(-500)}\n请终止该任务并搭配管道（如 \`echo y | 命令\`）或非交互参数重新运行。`)
+  }
   if (result.timedOut) {
     throw new Error(`命令超时（${timeout}ms）：${combined || preview(command, 120)}`)
   }
@@ -749,7 +905,11 @@ async function toolRunCommand(args: unknown, signal?: AbortSignal, projectCwd?: 
     const codeInfo = `（exitCode=${result.code ?? 'null'}${result.signal ? `, signal=${result.signal}` : ''}）`
     throw new Error(`命令失败${codeInfo}：${combined || preview(command, 120)}`)
   }
-  return combined || '(命令执行完成，无输出)'
+
+  return {
+    output: combined || '(命令执行完成，无输出)',
+    updatedCwd
+  }
 }
 
 interface SpawnCommandOptions {
@@ -764,6 +924,7 @@ interface SpawnCommandResult {
   signal: NodeJS.Signals | null
   timedOut: boolean
   exceededBuffer: boolean
+  timedOutDueToPrompt: boolean
 }
 
 /** 安全地杀死子进程及其派生的所有子子进程 */
@@ -792,41 +953,56 @@ function killProcess(child: ChildProcess): void {
   }
 }
 
-function spawnShellCommand(
+async function spawnShellCommand(
   command: string,
   options: SpawnCommandOptions,
   signal?: AbortSignal,
+  shellConf?: ShellConfig,
 ): Promise<SpawnCommandResult> {
+  const resolvedShellConf = shellConf ?? await getShellConfig()
+  const shell = resolvedShellConf.shell
+  const shellArgs = [...resolvedShellConf.argsPrefix, command]
+
+  // I/O 直接落盘：创建临时输出文件，避免 V8 内存占用与阻塞
+  const outputFilePath = path.join(
+    os.tmpdir(),
+    `wage-slave-out-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  )
+  const outFd = fsSync.openSync(outputFilePath, 'w')
+
   return new Promise((resolve, reject) => {
-    const isWin = process.platform === 'win32'
-    const shell = isWin ? 'cmd.exe' : '/bin/sh'
-    const shellArgs = isWin ? ['/c', command] : ['-c', command]
     const child = spawn(shell, shellArgs, {
       cwd: options.cwd,
       detached: true,
       windowsHide: true,
       env: {
         ...process.env,
-        ...(isWin && {
+        WAGE_SLAVE: '1',
+        ...(process.platform === 'win32' && {
           PYTHONIOENCODING: 'utf-8',
           PYTHONUTF8: '1',
         }),
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', outFd, outFd], // stdout/stderr 直接导向文件描述符
     })
 
-    const outputChunks: Buffer[] = []
-    let outputBytes = 0
     let timedOut = false
     let exceededBuffer = false
+    let timedOutDueToPrompt = false
     let isFinished = false
+    let lastGrowthTime = Date.now()
+    let lastSize = 0
 
     const cleanUp = () => {
       isFinished = true
       clearTimeout(timer)
+      clearInterval(watchdogInterval)
       if (signal && onAbort) {
         signal.removeEventListener('abort', onAbort)
       }
+      try {
+        fsSync.closeSync(outFd)
+      } catch {}
     }
 
     const killForLimit = () => {
@@ -839,11 +1015,66 @@ function spawnShellCommand(
       killProcess(child)
     }, options.timeoutMs)
 
+    // 交互式挂起看门狗提示符模式
+    const PROMPT_PATTERNS = [
+      /\(y\/n\)/i,
+      /\[y\/n\]/i,
+      /\(yes\/no\)/i,
+      /\b(?:Do you|Would you|Shall I|Are you sure|Ready to)\b.*\? *$/i,
+      /Press (any key|Enter)/i,
+      /Continue\?/i,
+      /Overwrite\?/i
+    ]
+
+    function looksLikePrompt(tail: string): boolean {
+      const lastLine = tail.trimEnd().split('\n').pop() ?? ''
+      return PROMPT_PATTERNS.some(p => p.test(lastLine))
+    }
+
+    const watchdogInterval = setInterval(() => {
+      if (isFinished) return
+      try {
+        const stats = fsSync.statSync(outputFilePath)
+        const currentSize = stats.size
+
+        // 1. 容量看门狗
+        if (currentSize > options.maxBuffer) {
+          killForLimit()
+          return
+        }
+
+        // 2. 挂起卡死看门狗
+        if (currentSize === lastSize) {
+          if (Date.now() - lastGrowthTime > 5000) {
+            const readLen = Math.min(1024, currentSize)
+            if (readLen > 0) {
+              const fd = fsSync.openSync(outputFilePath, 'r')
+              const buffer = Buffer.alloc(readLen)
+              fsSync.readSync(fd, buffer, 0, readLen, currentSize - readLen)
+              fsSync.closeSync(fd)
+
+              const tail = decodeProcessOutput(buffer)
+              if (looksLikePrompt(tail)) {
+                timedOutDueToPrompt = true
+                killProcess(child)
+              }
+            }
+          }
+        } else {
+          lastSize = currentSize
+          lastGrowthTime = Date.now()
+        }
+      } catch {}
+    }, 2000)
+
     let onAbort: (() => void) | null = null
     if (signal) {
       if (signal.aborted) {
         cleanUp()
         killProcess(child)
+        try {
+          fsSync.unlinkSync(outputFilePath)
+        } catch {}
         reject(new Error('Command aborted'))
         return
       }
@@ -851,37 +1082,38 @@ function spawnShellCommand(
         if (isFinished) return
         cleanUp()
         killProcess(child)
+        try {
+          fsSync.unlinkSync(outputFilePath)
+        } catch {}
         reject(new Error('Command aborted'))
       }
       signal.addEventListener('abort', onAbort, { once: true })
     }
 
-    child.stdout?.on('data', (chunk: Buffer) => {
-      if (isFinished) return
-      outputChunks.push(chunk)
-      outputBytes += chunk.length
-      if (outputBytes > options.maxBuffer) killForLimit()
-    })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (isFinished) return
-      outputChunks.push(chunk)
-      outputBytes += chunk.length
-      if (outputBytes > options.maxBuffer) killForLimit()
-    })
     child.on('error', err => {
       if (isFinished) return
       cleanUp()
+      try {
+        fsSync.unlinkSync(outputFilePath)
+      } catch {}
       reject(err)
     })
+
     child.on('close', (code, signalName) => {
       if (isFinished) return
       cleanUp()
+      let output = Buffer.alloc(0)
+      try {
+        output = fsSync.readFileSync(outputFilePath)
+        fsSync.unlinkSync(outputFilePath)
+      } catch {}
       resolve({
-        output: Buffer.concat(outputChunks),
+        output,
         code,
         signal: signalName,
         timedOut,
         exceededBuffer,
+        timedOutDueToPrompt,
       })
     })
   })

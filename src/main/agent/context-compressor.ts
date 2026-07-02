@@ -30,6 +30,7 @@ import type { AgentMessage } from '@shared/types'
 import { getConfig } from '../store'
 import { detectModelFamily, inferModelContextWindow, type ModelFamily } from './model-info'
 import { scaleCompressionConfigForContextWindow } from './prompt-cache-policy'
+import { findSafeSuffixStart, repairToolProtocolHistory } from './message-protocol'
 
 /** 压缩配置 */
 export interface CompressConfig {
@@ -126,23 +127,29 @@ export function compressHistoryForLLM(
   const cfg: CompressConfig = { ...getCompressConfig(), ...config }
   if (history.length === 0) return []
 
+  const protocolRepair = repairToolProtocolHistory(history)
+  const sourceHistory = protocolRepair.messages
+  if (protocolRepair.repairedCount > 0) {
+    log.warn(`[CtxCompressor] 修复 ${protocolRepair.repairedCount} 处历史 tool 协议断裂后再构建 LLM 上下文`)
+  }
+
   // 计算原始总字符数，用于决定触发哪个 Level
-  const totalChars = history.reduce((s, m) => s + (m.content?.length ?? 0), 0)
+  const totalChars = sourceHistory.reduce((s, m) => s + (m.content?.length ?? 0), 0)
 
   // 选择本次压缩 Level
   // Level 0 = 不压缩；Level 1 = 仅清理工具结果；Level 2 = 标准压缩；Level 3 = 激进压缩
   let level: 0 | 1 | 2 | 3 = 0
   if (totalChars > cfg.triggerLevel3Chars) level = 3
-  else if (totalChars > cfg.triggerLevel2Chars || history.length > cfg.triggerCount) level = 2
+  else if (totalChars > cfg.triggerLevel2Chars || sourceHistory.length > cfg.triggerCount) level = 2
   else if (totalChars > cfg.triggerLevel1Chars) level = 1
 
   if (level === 0) {
-    return [...history]
+    return [...sourceHistory]
   }
-  log.info(`[CtxCompressor] 触发压缩 Level ${level}（${history.length} 条 / ${totalChars} 字）`)
+  log.info(`[CtxCompressor] 触发压缩 Level ${level}（${sourceHistory.length} 条 / ${totalChars} 字）`)
 
   // ── 阶段 0：早期工具结果指纹化（所有 Level 都执行）──
-  let processed = clearOldToolResults(history, cfg.keepRecentTools)
+  let processed = clearOldToolResults(sourceHistory, cfg.keepRecentTools)
 
   // ── 阶段 1：单条 tool 输出超长 → 头尾截断（Level 2+ 执行）──
   if (level >= 2) {
@@ -238,12 +245,8 @@ function collapseEarlyMessages(
 ): AgentMessage[] {
   const totalChars = history.reduce((s, m) => s + (m.content?.length ?? 0), 0)
 
-  // 找到一个安全切点：尾部 keepRecent 条之前；如果该位置是 role=tool 则继续往后挪
-  // （因为 role=tool 必须紧跟带 tool_calls 的 assistant，否则配对断裂）
-  let cutSafe = Math.max(0, history.length - keepRecent)
-  while (cutSafe < history.length && history[cutSafe].role === 'tool') {
-    cutSafe++
-  }
+  // 找到一个安全切点：尾部 keepRecent 条之前；必要时向前扩展到完整 assistant/tool 组。
+  const cutSafe = findSafeSuffixStart(history, Math.max(0, history.length - keepRecent), 0)
   if (cutSafe >= history.length || cutSafe === 0) return history
 
   const folded = history.slice(0, cutSafe)

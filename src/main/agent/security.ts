@@ -254,19 +254,261 @@ export interface CommandCheckResult {
  * - allowed=false：命中风险规则，需弹窗让用户确认后再执行
  */
 export function checkCommand(command: string): CommandCheckResult {
+  return auditCommand(command)
+}
+
+/**
+ * 极具工程防护设计的 Fail-Closed 命令审计器
+ */
+export function auditCommand(command: string): CommandCheckResult {
   if (!command || typeof command !== 'string') {
     return { allowed: false, reason: '命令为空或非字符串' }
   }
-  for (const rule of DANGEROUS_RULES) {
-    if (rule.pattern.test(command)) {
+
+  // 1. 拦截非常规特殊控制字符或非法字符（防范解析逃逸）
+  if (hasIllegalControlCharacter(command)) {
+    return { allowed: false, reason: '命令包含非法控制字符，防范解析逃逸' }
+  }
+
+  // 2. 将命令按 Shell 管道/逻辑/顺序操作符进行分拆
+  const subcommands = splitSubcommands(command)
+
+  if (subcommands.length === 0) {
+    return { allowed: false, reason: '未解析到有效命令' }
+  }
+
+  // 3. 对每个子命令进行 Fail-Closed 校验
+  for (const sub of subcommands) {
+    // 3.1 提取环境变量赋值与实际执行命令
+    const parts = tokenizeShellArgs(sub)
+    if (parts.length === 0) continue // 空行/纯注释
+
+    // 检测命令是否包含极其复杂的嵌套（如反引号、子 Shell 展开 $()、括号）
+    if (sub.includes('`') || sub.includes('$(')) {
       return {
         allowed: false,
-        reason: rule.reason,
-        matchedPattern: rule.pattern.source,
+        reason: 'Fail-Closed 拦截：命令包含反引号或子 Shell 展开 $()，语法过于复杂，需要二次确认'
+      }
+    }
+
+    // 3.2 特定指令深度防御：检测重定向覆盖写裸设备/系统目录
+    const writeRedirectMatch = />\s*(\S+)/.exec(sub)
+    if (writeRedirectMatch) {
+      const targetFile = writeRedirectMatch[1]
+      if (/^\/dev\/(sda|sdb|nvme|disk|hd[a-z])/i.test(targetFile)) {
+        return { allowed: false, reason: `禁止写裸设备: ${targetFile}` }
+      }
+      if (/^\/etc\//i.test(targetFile)) {
+        return { allowed: false, reason: `禁止修改系统配置目录: ${targetFile}` }
+      }
+    }
+
+    // 3.3 提取命令名 (argv[0])
+    let cmdName = parts[0]
+    // 如果有环境变量赋值前缀，跳过它们
+    let cmdIdx = 0
+    while (cmdIdx < parts.length && /^[A-Za-z_]\w*=/.test(parts[cmdIdx])) {
+      cmdIdx++
+    }
+    if (cmdIdx >= parts.length) continue // 纯环境变量设置
+
+    cmdName = parts[cmdIdx]
+    cmdName = stripQuotes(cmdName).trim()
+
+    // 3.4 变量安全判定 (Variable Safety)
+    const hasUnsafeVar = checkUnsafeVariableExpansion(sub)
+    if (hasUnsafeVar) {
+      return {
+        allowed: false,
+        reason: '变量安全拦截：检测到未用双引号包裹的非安全环境变量展开，为防止参数分裂或路径通配符逃逸，需二次确认'
+      }
+    }
+
+    // 3.5 特定指令深度防御之 sed 约束
+    if (cmdName === 'sed') {
+      const hasUnsafeSed = checkSedArguments(parts.slice(cmdIdx + 1))
+      if (hasUnsafeSed) {
+        return {
+          allowed: false,
+          reason: '特定指令防御：sed 表达式疑似包含非常规替换动作或命令注入，需二次确认'
+        }
+      }
+    }
+
+    // 3.6 分类器 (Classifier) 对危险指令过滤
+    for (const rule of DANGEROUS_RULES) {
+      if (rule.pattern.test(sub)) {
+        return {
+          allowed: false,
+          reason: rule.reason,
+          matchedPattern: rule.pattern.source
+        }
       }
     }
   }
+
   return { allowed: true }
+}
+
+function hasIllegalControlCharacter(command: string): boolean {
+  for (let i = 0; i < command.length; i++) {
+    const code = command.charCodeAt(i)
+    if ((code >= 0 && code <= 8) || code === 11 || code === 12 || (code >= 14 && code <= 31)) {
+      return true
+    }
+  }
+  return false
+}
+
+function splitSubcommands(command: string): string[] {
+  const subs: string[] = []
+  let current = ''
+  let inDoubleQuote = false
+  let inSingleQuote = false
+  let escaped = false
+
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i]
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      current += char
+      escaped = true
+      continue
+    }
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote
+      current += char
+      continue
+    }
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote
+      current += char
+      continue
+    }
+    if (!inDoubleQuote && !inSingleQuote) {
+      const next2 = command.slice(i, i + 2)
+      if (next2 === '&&' || next2 === '||' || next2 === '|&') {
+        if (current.trim()) subs.push(current)
+        current = ''
+        i++
+        continue
+      }
+      if (char === ';' || char === '|' || char === '&' || char === '\n') {
+        if (current.trim()) subs.push(current)
+        current = ''
+        continue
+      }
+    }
+    current += char
+  }
+  if (current.trim()) subs.push(current)
+  return subs
+}
+
+function tokenizeShellArgs(subcommand: string): string[] {
+  const tokens: string[] = []
+  let current = ''
+  let inDoubleQuote = false
+  let inSingleQuote = false
+  let escaped = false
+
+  for (let i = 0; i < subcommand.length; i++) {
+    const char = subcommand[i]
+    if (escaped) {
+      current += char
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote
+      continue
+    }
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote
+      continue
+    }
+    if (!inDoubleQuote && !inSingleQuote && /\s/.test(char)) {
+      if (current.length > 0) {
+        tokens.push(current)
+        current = ''
+      }
+      continue
+    }
+    current += char
+  }
+  if (current.length > 0) {
+    tokens.push(current)
+  }
+  return tokens
+}
+
+function stripQuotes(arg: string): string {
+  if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {
+    return arg.slice(1, -1)
+  }
+  return arg
+}
+
+const SAFE_ENV_VARS = new Set([
+  'HOME', 'PWD', 'OLDPWD', 'USER', 'LOGNAME', 'SHELL', 'PATH', 'HOSTNAME', 'UID', 'EUID', 'PPID', 'TMPDIR'
+])
+
+function checkUnsafeVariableExpansion(subcommand: string): boolean {
+  let inDoubleQuote = false
+  let inSingleQuote = false
+  let escaped = false
+
+  for (let i = 0; i < subcommand.length; i++) {
+    const char = subcommand[i]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (char === '\\') {
+      escaped = true
+      continue
+    }
+    if (char === '"' && !inSingleQuote) {
+      inDoubleQuote = !inDoubleQuote
+      continue
+    }
+    if (char === "'" && !inDoubleQuote) {
+      inSingleQuote = !inSingleQuote
+      continue
+    }
+
+    if (!inDoubleQuote && !inSingleQuote && char === '$') {
+      const match = /^\$?\{?([A-Za-z_]\w*)\}?/.exec(subcommand.slice(i + 1))
+      if (match) {
+        const varName = match[1]
+        if (!SAFE_ENV_VARS.has(varName)) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+function checkSedArguments(args: string[]): boolean {
+  for (const arg of args) {
+    const clean = stripQuotes(arg).trim()
+    if (/^s([^\s\w\\]).*?\1.*?\1[a-z]*e[a-z]*$/.test(clean)) {
+      return true
+    }
+    if (/^s([^\s\w\\]).*?\1.*?\1[a-z]*w\s+\/etc/i.test(clean)) {
+      return true
+    }
+  }
+  return false
 }
 
 /**

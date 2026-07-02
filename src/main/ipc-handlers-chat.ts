@@ -22,6 +22,10 @@ import { getStoredApiKey } from './api-key'
 import { getAgentSession, saveAgentSession } from './agent/session-store'
 import { summarizeOnce } from './ai-chat-service'
 import type { AgentMessage } from '@shared/types'
+import { findSafeSuffixStart, estimatePromptTokensForMessages, repairToolProtocolHistory } from './agent/message-protocol'
+import { inferModelContextWindow } from './agent/model-info'
+import { buildSystemPrompt } from './agent/system-prompt'
+import { getActiveToolSchemas } from './agent/tool-registry'
 
 /**
  * 注册统一对话 IPC
@@ -181,20 +185,21 @@ export function registerChatIPC(): void {
       if (msgs.length < 6) {
         return { ok: false, error: '消息过少，无需压缩（至少 6 条）' }
       }
-      // 切片：保留首条 user + 最近 4 条（含本轮 assistant/tool），中间段做摘要
+      // 切片：保留首条 user + 安全的近期尾部。尾部切点不能落在 tool 结果中间，
+      // 否则下一次 OpenAI tool message 协议校验会 400。
       const firstUserIdx = msgs.findIndex(m => m.role === 'user')
       const keepHead: AgentMessage[] = firstUserIdx >= 0
         ? msgs.slice(0, firstUserIdx + 1)
         : msgs.slice(0, 1)
       const tailKeep = 4
-      const keepTail = msgs.slice(-tailKeep)
       // 中间段就是 keepHead 之后、keepTail 之前的部分
       const headEnd = keepHead.length
-      const tailStart = msgs.length - tailKeep
+      const tailStart = findSafeSuffixStart(msgs, msgs.length - tailKeep, headEnd)
       if (tailStart <= headEnd) {
         return { ok: false, error: '消息分布不足以压缩' }
       }
       const middle = msgs.slice(headEnd, tailStart)
+      const keepTail = msgs.slice(tailStart)
 
       // 拼接中间段文本（去掉空 content；tool 消息只保留前 800 字防爆 prompt）
       const segText = middle.map(m => {
@@ -219,9 +224,10 @@ export function registerChatIPC(): void {
         content: `[早期会话已手动压缩，以下为前情概要]：\n${summary || '（摘要为空，已折叠中间消息）'}`,
         createdAt: Date.now(),
       }
-      const nextMessages = [...keepHead, placeholder, ...keepTail]
+      const repaired = repairToolProtocolHistory([...keepHead, placeholder, ...keepTail])
+      const nextMessages = withEstimatedTokenUsage(repaired.messages)
       saveAgentSession({ ...session, messages: nextMessages })
-      log.info(`[Compact] sessionId=${sessionId} 中间 ${middle.length} 条 → 摘要 ${summary.length} 字`)
+      log.info(`[Compact] sessionId=${sessionId} 中间 ${middle.length} 条 → 摘要 ${summary.length} 字，保留尾部 ${keepTail.length} 条，协议修复 ${repaired.repairedCount} 处`)
       return { ok: true, summary, removed: middle.length }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -229,4 +235,63 @@ export function registerChatIPC(): void {
       return { ok: false, error: msg }
     }
   })
+}
+
+function withEstimatedTokenUsage(messages: AgentMessage[]): AgentMessage[] {
+  const maxTokens = inferModelContextWindow()
+  const promptTokens = estimatePromptTokensForMessages(messages, estimateStaticPromptChars())
+  const lastAssistantIdx = findLastAssistantIndex(messages)
+
+  return messages.map((message, index) => {
+    if (message.role !== 'assistant') return message
+    const metadata = {
+      ...(message.metadata ?? {}),
+      promptTokens: undefined,
+      completionTokens: undefined,
+      totalTokens: undefined,
+      cacheHitTokens: undefined,
+      maxTokens: undefined,
+    }
+    if (index !== lastAssistantIdx) {
+      return { ...message, metadata: compactMetadata(metadata) }
+    }
+    return {
+      ...message,
+      metadata: compactMetadata({
+        ...metadata,
+        promptTokens,
+        completionTokens: 0,
+        totalTokens: promptTokens,
+        maxTokens,
+        cacheHitTokens: 0,
+      }),
+    }
+  })
+}
+
+function estimateStaticPromptChars(): number {
+  try {
+    return buildSystemPrompt().length + JSON.stringify(getActiveToolSchemas()).length
+  } catch {
+    return 0
+  }
+}
+
+function findLastAssistantIndex(messages: AgentMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role === 'assistant') return i
+  }
+  return -1
+}
+
+function compactMetadata(metadata: NonNullable<AgentMessage['metadata']>): AgentMessage['metadata'] | undefined {
+  const next: NonNullable<AgentMessage['metadata']> = {}
+  if (metadata.model) next.model = metadata.model
+  if (typeof metadata.iteration === 'number') next.iteration = metadata.iteration
+  if (typeof metadata.promptTokens === 'number') next.promptTokens = metadata.promptTokens
+  if (typeof metadata.completionTokens === 'number') next.completionTokens = metadata.completionTokens
+  if (typeof metadata.totalTokens === 'number') next.totalTokens = metadata.totalTokens
+  if (typeof metadata.maxTokens === 'number') next.maxTokens = metadata.maxTokens
+  if (typeof metadata.cacheHitTokens === 'number') next.cacheHitTokens = metadata.cacheHitTokens
+  return Object.keys(next).length > 0 ? next : undefined
 }

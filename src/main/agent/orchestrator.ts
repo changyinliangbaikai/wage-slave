@@ -41,6 +41,7 @@ import { inferModelContextWindow } from './model-info'
 import { appendRuntimeContextToUserContent, buildRunScopedHistory } from './prompt-cache-policy'
 import { compactContextSegments, compactTraceMessages, compactTraceText, summarizeTraceTools } from './trace-payload'
 import { shouldAutoContinueAfterOutputLimit } from './output-limit-handling'
+import { repairToolProtocolHistory } from './message-protocol'
 
 /** 编排器最大迭代轮次，防止 LLM 反复调用工具死循环 */
 const DEFAULT_MAX_ITERATIONS = 20
@@ -175,7 +176,11 @@ export class AgentOrchestrator {
           }, timeoutMs)
         : null
 
-      this.history = [...opts.history]
+      const repairedInitialHistory = repairToolProtocolHistory(opts.history)
+      this.history = repairedInitialHistory.messages
+      if (repairedInitialHistory.repairedCount > 0) {
+        log.warn(`[Agent] sessionId=${this.sessionId} 修复 ${repairedInitialHistory.repairedCount} 处历史 tool 协议断裂`)
+      }
       const runStartIndex = this.history.length
       const stableHistoryForLLM = compressHistoryForLLM(this.history)
       this.stats = { iterations: 0, toolCalls: 0, totalDurationMs: 0 }
@@ -215,7 +220,12 @@ export class AgentOrchestrator {
         const systemPrompt = buildSystemPrompt()
         const tools = getActiveToolSchemas()
         // 旧历史在用户回合开始时压缩一次；当前 run 的消息保持原样追加，避免循环内反复改写缓存前缀
-        const compressedHistory = buildRunScopedHistory(this.history, runStartIndex, stableHistoryForLLM)
+        const scopedHistory = buildRunScopedHistory(this.history, runStartIndex, stableHistoryForLLM)
+        const repairedScopedHistory = repairToolProtocolHistory(scopedHistory)
+        if (repairedScopedHistory.repairedCount > 0) {
+          log.warn(`[Agent] sessionId=${this.sessionId} 第 ${this.stats.iterations} 轮修复 ${repairedScopedHistory.repairedCount} 处 LLM 输入 tool 协议断裂`)
+        }
+        const compressedHistory = repairedScopedHistory.messages
         const apiMessages = [
           { role: 'system' as const, content: systemPrompt },
           ...compressedHistory.map(m => historyToApi(m)),
@@ -674,6 +684,11 @@ export class AgentOrchestrator {
     // 把当前会话的项目工作目录注入工具上下文，作为相对路径解析基准
     const result = await executeTool(tc, { signal, projectCwd: this.projectCwd })
 
+    if (result.updatedCwd) {
+      log.info(`[Orchestrator] 工作目录由 ${this.projectCwd} 变更为: ${result.updatedCwd}`)
+      this.projectCwd = result.updatedCwd
+    }
+
     collector.record('tool.call', {
       toolCallId: tc.id,
       tool: tc.name,
@@ -731,6 +746,7 @@ export class AgentOrchestrator {
         // 记录会话所属项目，便于按项目过滤
         projectId: this.projectId,
         stats: { ...this.stats },
+        cwd: this.projectCwd, // 保存当前工作目录
       }
       saveAgentSession(session)
       log.info(`[Agent] 持久化会话 id=${this.sessionId} msgs=${persistableMessages.length} latestLen=${latestContent.length}`)

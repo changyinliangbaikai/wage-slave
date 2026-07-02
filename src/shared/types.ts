@@ -602,6 +602,8 @@ export interface AgentToolResult {
   fatal?: boolean
   /** 执行耗时（毫秒） */
   durationMs: number
+  /** 执行命令后工作目录的变更（CWD 追踪） */
+  updatedCwd?: string
 }
 
 /** Agent 会话元数据（不含完整消息，列表用） */
@@ -626,6 +628,8 @@ export interface AgentSession extends AgentSessionMeta {
     toolCalls: number
     totalDurationMs: number
   }
+  /** 会话当前的动态工作目录 */
+  cwd?: string
 }
 
 /** Agent 上下文（注入到 System Prompt） */

@@ -72,7 +72,7 @@ export class DialogueService {
       ?? session?.projectId
       ?? 'default'
     const project = getProject(projectId) ?? getDefaultProject()
-    const projectCwd = project.path
+    const projectCwd = session?.cwd ?? project.path
 
     log.info(`[Dialogue] agent 模式启动 sessionId=${sessionId}, 历史=${history.length} 条, projectId=${projectId}, cwd=${projectCwd}`)
 
