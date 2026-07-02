@@ -757,7 +757,7 @@ async function getShellConfig(): Promise<ShellConfig> {
     const shell = pwshProbe.status === 0 ? 'pwsh' : 'powershell.exe'
     return {
       shell,
-      argsPrefix: ['-NoProfile', '-NonInteractive', '-Command'],
+      argsPrefix: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'],
       isPowerShell: true
     }
   } else {
@@ -768,6 +768,20 @@ async function getShellConfig(): Promise<ShellConfig> {
       isPowerShell: false
     }
   }
+}
+
+function buildShellArgs(shellConf: ShellConfig, command: string): string[] {
+  if (!shellConf.isPowerShell) {
+    return [...shellConf.argsPrefix, command]
+  }
+
+  // PowerShell parses -Command through Windows argv quoting. Encoding the full
+  // wrapper avoids losing newlines, quotes, unicode, or trailing redirections.
+  return [
+    ...shellConf.argsPrefix,
+    '-EncodedCommand',
+    Buffer.from(command, 'utf16le').toString('base64'),
+  ]
 }
 
 function quoteForPosixShell(value: string): string {
@@ -944,21 +958,81 @@ async function openCommandOutputFile(filePath: string): Promise<fs.FileHandle> {
   )
 }
 
-function readFileRangeSync(filePath: string, maxBytes: number): Buffer {
-  const fd = fsSync.openSync(filePath, 'r')
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function readFileRangeBuffer(filePath: string, maxBytes: number): Promise<Buffer> {
+  const fh = await fs.open(filePath, 'r')
   try {
-    const stats = fsSync.fstatSync(fd)
+    const stats = await fh.stat()
     const bytesToRead = Math.min(stats.size, maxBytes)
     const output = Buffer.allocUnsafe(bytesToRead)
     let totalRead = 0
     while (totalRead < bytesToRead) {
-      const bytesRead = fsSync.readSync(fd, output, totalRead, bytesToRead - totalRead, totalRead)
+      const { bytesRead } = await fh.read(output, totalRead, bytesToRead - totalRead, totalRead)
       if (bytesRead === 0) break
       totalRead += bytesRead
     }
     return totalRead === output.length ? output : output.subarray(0, totalRead)
   } finally {
-    fsSync.closeSync(fd)
+    await fh.close().catch(() => {})
+  }
+}
+
+async function waitForOutputFileSettled(filePath: string): Promise<number> {
+  const maxWaitMs = process.platform === 'win32' ? 1000 : 0
+  const intervalMs = 25
+  const started = Date.now()
+  let lastSize = -1
+  let lastSeenSize = 0
+
+  while (true) {
+    try {
+      const size = (await fs.stat(filePath)).size
+      lastSeenSize = size
+
+      if (maxWaitMs === 0) return size
+      if (size > 0 && size === lastSize) return size
+      lastSize = size
+    } catch (err) {
+      if (maxWaitMs === 0) throw err
+    }
+
+    if (Date.now() - started >= maxWaitMs) {
+      return lastSeenSize
+    }
+    await delay(intervalMs)
+  }
+}
+
+async function readCommandOutputFile(filePath: string, maxBytes: number): Promise<Buffer> {
+  let lastErr: unknown
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      return await readFileRangeBuffer(filePath, maxBytes)
+    } catch (err) {
+      lastErr = err
+      if (process.platform !== 'win32') break
+      await delay(50)
+    }
+  }
+
+  log.warn(`[AgentTool] 读取命令输出文件失败: ${filePath}`, lastErr)
+  return Buffer.alloc(0)
+}
+
+async function unlinkFileQuietly(filePath: string): Promise<void> {
+  try {
+    await fs.unlink(filePath)
+  } catch {}
+}
+
+async function getFileSizeQuietly(filePath: string): Promise<number> {
+  try {
+    return (await fs.stat(filePath)).size
+  } catch {
+    return 0
   }
 }
 
@@ -1015,7 +1089,7 @@ async function spawnShellCommand(
 ): Promise<SpawnCommandResult> {
   const resolvedShellConf = shellConf ?? await getShellConfig()
   const shell = resolvedShellConf.shell
-  const shellArgs = [...resolvedShellConf.argsPrefix, command]
+  const shellArgs = buildShellArgs(resolvedShellConf, command)
   // I/O 直接落盘：Windows 按 Claude 的做法用 'w' 打开，避免 MSYS2/Cygwin
   // 将 append-only 句柄误判为只读后丢弃输出；POSIX 继续使用 append + no-follow。
   const outputFilePath = path.join(
@@ -1034,9 +1108,7 @@ async function spawnShellCommand(
 
   const unlinkOutputFileAfterClose = () => {
     void closeOutputHandle().then(() => {
-      try {
-        fsSync.unlinkSync(outputFilePath)
-      } catch {}
+      void unlinkFileQuietly(outputFilePath)
     })
   }
 
@@ -1162,13 +1234,18 @@ async function spawnShellCommand(
       if (isFinished) return
       cleanUp()
       let output = Buffer.alloc(0)
-      void closeOutputHandle().then(() => {
+      void (async () => {
+        await closeOutputHandle()
         try {
-          const finalSize = fsSync.statSync(outputFilePath).size
+          const settledSize = await waitForOutputFileSettled(outputFilePath)
+          const finalSize = settledSize || await getFileSizeQuietly(outputFilePath)
           if (finalSize > options.maxBuffer) exceededBuffer = true
-          output = readFileRangeSync(outputFilePath, options.maxBuffer)
-          fsSync.unlinkSync(outputFilePath)
-        } catch {}
+          output = await readCommandOutputFile(outputFilePath, options.maxBuffer)
+          await unlinkFileQuietly(outputFilePath)
+        } catch (err) {
+          log.warn(`[AgentTool] 命令输出文件收尾失败: ${outputFilePath}`, err)
+          await unlinkFileQuietly(outputFilePath)
+        }
         resolve({
           output,
           code,
