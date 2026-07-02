@@ -1,6 +1,6 @@
 {
   "name": "xiao-niu-ma",
-  "version": "2.2.1-Pre",
+  "version": "2.2.1-Test",
   "description": "小小牛马 - 桌面像素猫助手",
   "main": "dist-electron/main/index.js",
   "scripts": {
